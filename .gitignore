@@ -1,0 +1,25 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+
+# Build & Dist executables
+dist/
+build/
+*.exe
+*.bin
+
+# Offline Licensing secrets & generated keys
+*.lic
+*private_key*
+*secret*
+ui_settings.json
+ui_config.json
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

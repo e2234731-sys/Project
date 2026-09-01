@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/Powered%20By-%E9%99%88%E8%80%BF%E5%BF%A0%20(CCAA%E5%9B%BD%E5%AE%B6%E6%B3%A8%E5%86%8C%E5%AE%A1%E6%A0%B8%E5%91%98)-0284C7?style=for-the-badge&logo=shield&logoColor=white" />
   <img src="https://img.shields.io/badge/%E6%9D%83%E5%A8%81%E9%99%90%E9%87%8F%E6%95%B0%E6%8D%AE-83,973%20%E6%9D%A1-10B981?style=for-the-badge&logo=databricks&logoColor=white" />
   <img src="https://img.shields.io/badge/%E8%B4%A8%E9%87%8F%E4%BD%93%E7%B3%BB-ISO%2FIEC%2017025%20%7C%20RB%2FT%20214-F59E0B?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC-V1.0%20Official-blue?style=for-the-badge" />
+  <a href="https://github.com/e2234731-sys/Project/releases/tag/V1.0"><img src="https://img.shields.io/badge/Release-V1.0%20Official-blue?style=for-the-badge&logo=github" /></a>
 </p>
 
 ---
@@ -76,9 +76,12 @@
 
 本工作台采用独立单文件绿色免安装打包，**无需安装 Python 环境，开箱即用**：
 
-1. 前往本项目的 **[Releases 发布页面](../../releases)**；
-2. 下载最新版本的 `食品安全标准判定核查工具(完整版)_批量表头筛选.exe` 或 `食品安全标准判定核查工具(纯净版)V1.0.exe`；
-3. 双击直接运行。
+| 版本类型 | 发布包文件名 | 体积 | 下载直链 |
+| :--- | :--- | :---: | :---: |
+| **全功能增强版 (推荐)** | `FoodSafetyStandardChecker_Full_BatchFilter_V1.0.exe` | 61.92 MB | [📥 点击下载全功能版](https://github.com/e2234731-sys/Project/releases/download/V1.0/FoodSafetyStandardChecker_Full_BatchFilter_V1.0.exe) |
+| **纯净极速版** | `FoodSafetyStandardChecker_Clean_V1.0.exe` | 31.99 MB | [📥 点击下载纯净版](https://github.com/e2234731-sys/Project/releases/download/V1.0/FoodSafetyStandardChecker_Clean_V1.0.exe) |
+
+> 🔖 完整版本发布历史与更新日志请见：[GitHub Releases 官方发布页](https://github.com/e2234731-sys/Project/releases/tag/V1.0)
 
 ---
 

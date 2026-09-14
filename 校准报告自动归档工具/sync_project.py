@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, subprocess, tempfile, shutil
+import os, sys, subprocess, tempfile, shutil, time, uuid
 
 if sys.platform.startswith('win'):
     try:
@@ -14,7 +14,7 @@ PROJECT_NAME = os.path.basename(PROJECT_DIR)
 
 print(f'==> 开始同步项目 [{PROJECT_NAME}] 至 GitHub: {REPO_URL}...')
 
-temp_dir = os.path.join(tempfile.gettempdir(), 'github_project_sync')
+temp_dir = os.path.join(tempfile.gettempdir(), f'gh_sync_{uuid.uuid4().hex[:8]}')
 if os.path.exists(temp_dir):
     shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -45,7 +45,7 @@ try:
     status = subprocess.run(['git', '-C', temp_dir, 'status', '--porcelain'], capture_output=True, text=True)
     
     if status.stdout.strip():
-        subprocess.run(['git', '-C', temp_dir, 'commit', '-m', f'update({PROJECT_NAME}): sync latest updates'], check=True)
+        subprocess.run(['git', '-C', temp_dir, 'commit', '-m', f'fix(calib): fix Dafeng calibration date parsing and multi-ledger loading'], check=True)
         subprocess.run(['git', '-C', temp_dir, 'push', 'origin', 'main'], check=True)
         print('✅ 成功推送到 GitHub 远程仓库！')
     else:
@@ -55,4 +55,7 @@ except Exception as e:
     print(f'❌ 同步失败: {e}')
 finally:
     if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass

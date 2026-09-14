@@ -332,8 +332,16 @@ class LedgerDatabase:
             os.path.join(APP_ROOT, ".."),
             r"D:\工作\01.实验室法定资质与17025体系\1.定量实验室17025体系维护\2.设备管理\1.设备检定校准\1.历年设备检定校准证书",
             r"D:\工作\01.实验室法定资质与17025体系\1.定量实验室17025体系维护\2.设备管理\1.设备检定校准",
+            r"D:\工作\01.实验室法定资质与17025体系\1.定量实验室17025体系维护\2.设备管理",
             r"D:\工作\03.快检质量网络与驻点管理\8.快检工作\7.快检设备检定校准",
             r"D:\工作\03.快检质量网络与驻点管理\8.快检工作\7.快检设备检定校准\1.设备校准证书",
+            r"D:\工作\9.行政工作\3.财务\1.历年付款及报销\2026年付款及报销\2026年校准费用",
+            r"D:\工作\9.行政工作\3.财务\1.历年付款及报销\2026年付款及报销\2026年校准费用\2026年第三季度技术中心达丰校准设备",
+            r"D:\工作\9.行政工作\3.财务\1.历年付款及报销\2026年付款及报销\2026年校准费用\2026年第二季度技术中心设备校准-达丰",
+            r"D:\工作\9.行政工作\3.财务\1.历年付款及报销\2026年付款及报销\2026年校准费用\2026年第一季度技术中心设备校准（除移液枪和玻璃器皿）-达丰",
+            r"D:\工作\9.行政工作\3.财务\1.历年付款及报销\2026年付款及报销\2026年校准费用\2026年第三季度技术中心中广测校准设备",
+            r"D:\工作\9.行政工作\3.财务\1.历年付款及报销\2026年付款及报销\2026年校准费用\2026年第二季度技术中心移液枪及扩项设备校准-中广测",
+            r"D:\工作\9.行政工作\3.财务\1.历年付款及报销\2026年付款及报销\2026年校准费用\2026年第一季度技术中心玻璃器皿及移液枪校准-中广测",
             os.getcwd()
         ]
         search_dirs = list(dict.fromkeys([os.path.abspath(d) for d in search_dirs if os.path.exists(d)]))
@@ -364,26 +372,24 @@ class LedgerDatabase:
 
         # 2. 检索定量计划汇总与台账
         quant_candidates = ['2026年年度计划汇总.xlsx', '年度计划汇总.xlsx', '量值溯源总表.xlsx']
-        found_quant = False
         for sdir in search_dirs:
             for fname in quant_candidates:
                 fpath = os.path.join(sdir, fname)
-                if os.path.exists(fpath):
+                if os.path.exists(fpath) and fpath not in self.loaded_sources:
                     self._load_quantitative_excel(fpath, log)
-                    found_quant = True
                     self.loaded_sources.append(fpath)
-                    break
-            if found_quant: break
-        if not found_quant:
-            for sdir in search_dirs:
+
+        # 3. 递归加载财务/季度批次送检台账中的关键设备
+        for sdir in search_dirs:
+            try:
                 for f in os.listdir(sdir):
-                    if f.endswith('.xlsx') and ('计划汇总' in f or '量值溯源' in f) and not f.startswith('~$') and not '提取汇总' in f and not '本次扫描' in f:
+                    if f.endswith('.xlsx') and not f.startswith('~$') and not '本次扫描' in f and not '统计汇总' in f and not '提取汇总' in f:
                         fpath = os.path.join(sdir, f)
-                        self._load_quantitative_excel(fpath, log)
-                        found_quant = True
-                        self.loaded_sources.append(fpath)
-                        break
-                if found_quant: break
+                        if fpath not in self.loaded_sources:
+                            self._load_quantitative_excel(fpath, log)
+                            self.loaded_sources.append(fpath)
+            except Exception:
+                pass
 
         invalid_set = {'NAN', 'NONE', '', '/', '\\', '-', '—', '无', '无编号', '待定', '暂不校准', 'SERIAL'}
         all_assets = set()
@@ -487,35 +493,61 @@ class LedgerDatabase:
         except Exception as e:
             log(f"⚠️ 加载定量台账异常: {e}")
 
-    def query(self, asset_no=None, serial_no=None):
+    def _lookup_direct(self, clean_no):
+        if clean_no in self.quick_check_map:
+            info = self.quick_check_map[clean_no]
+            return {
+                'asset_no': clean_no, 'type': '快检',
+                'lab': info.get('lab', '未知实验室'),
+                'group': info.get('lab', '未知实验室'),
+                'inst': info.get('inst', '未查找到'), 'serial_no': ''
+            }
+        if clean_no in self.quantitative_map:
+            info = self.quantitative_map[clean_no]
+            return {
+                'asset_no': clean_no, 'type': '定量',
+                'group': info.get('group', '未知组别'),
+                'lab': '定量实验室',
+                'inst': info.get('inst', '未查找到'),
+                'serial_no': info.get('serial_no', '')
+            }
+        no_upper = clean_no.upper()
+        for k, v in self.quick_check_map.items():
+            if k.upper() == no_upper:
+                return {'asset_no': k, 'type': '快检', 'lab': v.get('lab', '未知实验室'), 'group': v.get('lab', '未知实验室'), 'inst': v.get('inst', '未查找到'), 'serial_no': ''}
+        for k, v in self.quantitative_map.items():
+            if k.upper() == no_upper:
+                return {'asset_no': k, 'type': '定量', 'group': v.get('group', '未知组别'), 'lab': '定量实验室', 'inst': v.get('inst', '未查找到'), 'serial_no': v.get('serial_no', '')}
+        return None
+
+    def query(self, asset_no=None, serial_no=None, inst_name=""):
         if asset_no:
             clean_no = str(asset_no).strip()
             clean_no = re.sub(r'^HO(\d+)$', r'H0\1', clean_no)
             
-            if clean_no in self.quick_check_map:
-                info = self.quick_check_map[clean_no]
-                return {
-                    'asset_no': clean_no, 'type': '快检',
-                    'lab': info.get('lab', '未知实验室'),
-                    'group': info.get('lab', '未知实验室'),
-                    'inst': info.get('inst', '未查找到'), 'serial_no': ''
-                }
-            if clean_no in self.quantitative_map:
-                info = self.quantitative_map[clean_no]
-                return {
-                    'asset_no': clean_no, 'type': '定量',
-                    'group': info.get('group', '未知组别'),
-                    'lab': '定量实验室',
-                    'inst': info.get('inst', '未查找到'),
-                    'serial_no': info.get('serial_no', '')
-                }
-            no_upper = clean_no.upper()
-            for k, v in self.quick_check_map.items():
-                if k.upper() == no_upper:
-                    return {'asset_no': k, 'type': '快检', 'lab': v.get('lab', '未知实验室'), 'group': v.get('lab', '未知实验室'), 'inst': v.get('inst', '未查找到'), 'serial_no': ''}
-            for k, v in self.quantitative_map.items():
-                if k.upper() == no_upper:
-                    return {'asset_no': k, 'type': '定量', 'group': v.get('group', '未知组别'), 'lab': '定量实验室', 'inst': v.get('inst', '未查找到'), 'serial_no': v.get('serial_no', '')}
+            res = self._lookup_direct(clean_no)
+            if res:
+                if serial_no: res['serial_no'] = serial_no
+                return res
+
+            # 零填充兼容模糊检索 (如 FYS047 <-> FYS47, WJ051 <-> WJ51, WSJ035 <-> WSJ35)
+            m_pad = re.match(r'^([A-Za-z]+)0+(\d+)$', clean_no)
+            if m_pad:
+                alt_no = f"{m_pad.group(1)}{m_pad.group(2)}"
+                res = self._lookup_direct(alt_no)
+                if res:
+                    res['asset_no'] = clean_no
+                    if serial_no: res['serial_no'] = serial_no
+                    return res
+            else:
+                m_unpad = re.match(r'^([A-Za-z]+)(\d{1,2})$', clean_no)
+                if m_unpad:
+                    alt_no = f"{m_unpad.group(1)}{int(m_unpad.group(2)):03d}"
+                    res = self._lookup_direct(alt_no)
+                    if res:
+                        res['asset_no'] = clean_no
+                        if serial_no: res['serial_no'] = serial_no
+                        return res
 
         if serial_no:
             clean_sn = str(serial_no).strip()
@@ -531,9 +563,35 @@ class LedgerDatabase:
                     res['serial_no'] = clean_sn
                     return res
 
+        # 启发式仪器与组别智能映射
+        grp_fallback = '未知组别'
+        dev_type = '未知'
+        if inst_name:
+            if any(k in inst_name for k in ['液相', 'HPLC', '荧光检测器', '二极管阵列', 'U3000']):
+                grp_fallback = '液相组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['气相', 'GC', '顶空', 'ECD', 'FID', 'FPD']):
+                grp_fallback = '气相组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['离子计', '折光仪', '折射仪', '酸度计', 'pH计', '旋光仪', '电导率', '水分仪', '天平', '分析天平']):
+                grp_fallback = '理化组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['培养箱', '生化培养箱', '灭菌器', '蒸汽灭菌', '生物安全柜', '超净工作台', '菌落计数']):
+                grp_fallback = '微生物组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['ICP', '原子吸收', 'AAS', '原子荧光', 'AFS', '测汞仪', '重金属']):
+                grp_fallback = '元素组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['标准筛', '分样筛', '药典筛', '试验筛', '振筛机', '制样']):
+                grp_fallback = '运行组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['温湿度', '温湿度计', '温度计', '温湿度记录仪']):
+                grp_fallback = '综合组'
+                dev_type = '定量'
+
         return {
-            'asset_no': asset_no or '未知编号', 'type': '未知',
-            'group': '未知组别', 'lab': '未知实验室', 'inst': '未查找到', 'serial_no': serial_no or ''
+            'asset_no': asset_no or '未知编号', 'type': dev_type,
+            'group': grp_fallback, 'lab': '未知实验室', 'inst': inst_name or '未查找到', 'serial_no': serial_no or ''
         }
 
 
@@ -589,7 +647,7 @@ def extract_dn(text, text_clean, ledger, filename=""):
 
     cal_raw = ""
     for i, l in enumerate(lines):
-        if re.search(r'Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期', l, re.I):
+        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
             for j in range(i+1, min(i+4, len(lines))):
                 m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
                 if m_d:
@@ -597,14 +655,14 @@ def extract_dn(text, text_clean, ledger, filename=""):
                     break
             if cal_raw: break
     if not cal_raw:
-        m_cal = re.search(r'校\s*准\s*日\s*期[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text)
-        if m_cal:
+        m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
+        if m_cal and m_cal.group(1):
             cal_raw = m_cal.group(1)
     cal_date = normalize_date(cal_raw, filename=filename)
 
     issue_raw = ""
     for i, l in enumerate(lines):
-        if re.search(r'Date of Issue|签\s*发\s*日\s*期|批\s*准\s*日\s*期', l, re.I):
+        if re.search(r'(?:Date of Issue|签\s*发\s*日\s*期|批\s*准\s*日\s*期|发布日期|Issued Date)', l, re.I):
             for j in range(i+1, min(i+4, len(lines))):
                 m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
                 if m_d:
@@ -612,8 +670,8 @@ def extract_dn(text, text_clean, ledger, filename=""):
                     break
             if issue_raw: break
     if not issue_raw:
-        m_iss = re.search(r'签\s*发\s*日\s*期|批\s*准\s*日\s*期[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text)
-        if m_iss:
+        m_iss = re.search(r'(?:签\s*发\s*日\s*期|批\s*准\s*日\s*期|发布日期|Issued Date)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
+        if m_iss and m_iss.group(1):
             issue_raw = m_iss.group(1)
         elif filename:
             dates_in_fn = re.findall(r'\b(20\d{2}[01]\d[0-3]\d)\b', os.path.basename(filename))
@@ -621,7 +679,15 @@ def extract_dn(text, text_clean, ledger, filename=""):
                 issue_raw = dates_in_fn[1]
     issue_date = normalize_date(issue_raw, filename=filename)
 
-    info = ledger.query(asset_no=asset_no, serial_no=serial_no)
+    inst_name = ''
+    for i, l in enumerate(lines):
+        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
+            cand = lines[i+1].strip()
+            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+                inst_name = cand
+                break
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
     if (not asset_no or asset_no == '未知编号') and info.get('asset_no') != '未知编号':
         asset_no = info.get('asset_no')
 
@@ -631,18 +697,12 @@ def extract_dn(text, text_clean, ledger, filename=""):
         if len(parts) >= 2 and not re.match(r'^(20\d{2}|H\d+|YYQ|KJ|WJ|\d+$)', parts[0]):
             lab_name = parts[0]
 
-    inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else ''
-    if not inst_name:
-        for i, l in enumerate(lines):
-            if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
-                cand = lines[i+1].strip()
-                if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
-                    inst_name = cand
-                    break
-        if not inst_name and filename:
-            parts = os.path.splitext(filename)[0].split('_')
-            if len(parts) >= 3 and not re.match(r'^\d+$', parts[-1]):
-                inst_name = parts[-1]
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else ''
+    if not inst_name and filename:
+        parts = os.path.splitext(filename)[0].split('_')
+        if len(parts) >= 3 and not re.match(r'^\d+$', parts[-1]):
+            inst_name = parts[-1]
 
     inst_name = inst_name or '未查找到'
 
@@ -665,8 +725,9 @@ def extract_daf(text, text_clean, ledger, filename=""):
     for i, l in enumerate(lines):
         if re.search(r'出\s*厂\s*编\s*号|Serial\s*No\.?', l, re.I) and not serial_no:
             for j in range(i+1, min(i+4, len(lines))):
-                if re.search(r'[A-Za-z0-9]', lines[j]) and not any(k in lines[j] for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial', 'Asset']):
-                    serial_no = lines[j]
+                cand = lines[j].strip()
+                if re.search(r'[A-Za-z0-9]', cand) and not any(k in cand for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial', 'Asset', 'JJG', 'JJF']):
+                    serial_no = cand
                     break
         elif re.search(r'管\s*理\s*号|Asset\s*No\.?', l, re.I) and not asset_no:
             for j in range(i+1, min(i+4, len(lines))):
@@ -695,33 +756,36 @@ def extract_daf(text, text_clean, ledger, filename=""):
 
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
 
-    info = ledger.query(asset_no=asset_no, serial_no=serial_no)
+    inst_name = ''
+    for i, l in enumerate(lines):
+        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
+            cand = lines[i+1].strip()
+            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+                inst_name = cand
+                break
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
     if not asset_no or asset_no == '未知编号':
         if info.get('asset_no') and info.get('asset_no') != '未知编号':
             asset_no = info.get('asset_no')
 
-    inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
-    if inst_name == '未查找到':
-        for i, l in enumerate(lines):
-            if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
-                cand = lines[i+1].strip()
-                if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
-                    inst_name = cand
-                    break
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
 
     cal_raw = ""
-    m_cal = re.search(r'校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text)
-    if m_cal:
-        cal_raw = m_cal.group(1)
-    else:
-        for i, l in enumerate(lines):
-            if re.search(r'Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期', l, re.I):
-                for j in range(i+1, min(i+4, len(lines))):
-                    m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
-                    if m_d:
-                        cal_raw = m_d.group(1)
-                        break
-                if cal_raw: break
+    for i, l in enumerate(lines):
+        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                if m_d:
+                    cal_raw = m_d.group(1)
+                    break
+            if cal_raw: break
+
+    if not cal_raw:
+        m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
+        if m_cal and m_cal.group(1):
+            cal_raw = m_cal.group(1)
 
     cal_date = normalize_date(cal_raw, filename=filename)
 
@@ -748,13 +812,13 @@ def extract_nem(text, text_clean, ledger, filename=""):
                 if re.search(r'[A-Za-z0-9]', lines[j]) and not any(k in lines[j] for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial']):
                     raw_sn = lines[j]
                     break
-        elif (re.search(r'Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期', l, re.I)) and not cal_date:
+        elif (re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I)) and not cal_date:
             for j in range(i+1, min(i+4, len(lines))):
                 m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
                 if m_d:
                     cal_date = m_d.group(1)
                     break
-        elif (re.search(r'Date of Issue|签\s*发\s*日\s*期|批\s*准\s*日\s*期', l, re.I)) and not issue_date:
+        elif (re.search(r'(?:Date of Issue|签\s*发\s*日\s*期|批\s*准\s*日\s*期|发布日期|Issued Date)', l, re.I)) and not issue_date:
             for j in range(i+1, min(i+4, len(lines))):
                 m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
                 if m_d:
@@ -787,7 +851,7 @@ def extract_nem(text, text_clean, ledger, filename=""):
 
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
 
-    info = ledger.query(asset_no=asset_no, serial_no=serial_no)
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=desc)
     if not asset_no and info.get('asset_no') != '未知编号':
         asset_no = info.get('asset_no')
 
@@ -827,13 +891,34 @@ def extract_smq(text, text_clean, ledger, filename=""):
                     break
 
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
-    info = ledger.query(asset_no=asset_no, serial_no=serial_no)
 
-    inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+    inst_name = ''
+    for i, l in enumerate(lines):
+        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
+            cand = lines[i+1].strip()
+            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+                inst_name = cand
+                break
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+
     cal_raw = ""
-    m_cal = re.search(r'校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text)
-    if m_cal:
-        cal_raw = m_cal.group(1)
+    for i, l in enumerate(lines):
+        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                if m_d:
+                    cal_raw = m_d.group(1)
+                    break
+            if cal_raw: break
+
+    if not cal_raw:
+        m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
+        if m_cal and m_cal.group(1):
+            cal_raw = m_cal.group(1)
+
     cal_date = normalize_date(cal_raw, filename=filename)
 
     return {
@@ -849,6 +934,8 @@ def extract_smq(text, text_clean, ledger, filename=""):
 def extract_ccic(text, text_clean, ledger, filename=""):
     asset_no = None
     serial_no = ""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+
     for asset in ledger.sorted_asset_list:
         if asset in text or (filename and asset in filename):
             asset_no = asset
@@ -859,13 +946,34 @@ def extract_ccic(text, text_clean, ledger, filename=""):
             asset_no = m_fn.group(1).strip()
 
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
-    info = ledger.query(asset_no=asset_no, serial_no=serial_no)
 
-    inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+    inst_name = ''
+    for i, l in enumerate(lines):
+        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
+            cand = lines[i+1].strip()
+            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+                inst_name = cand
+                break
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+
     cal_raw = ""
-    m_cal = re.search(r'校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text)
-    if m_cal:
-        cal_raw = m_cal.group(1)
+    for i, l in enumerate(lines):
+        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                if m_d:
+                    cal_raw = m_d.group(1)
+                    break
+            if cal_raw: break
+
+    if not cal_raw:
+        m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
+        if m_cal and m_cal.group(1):
+            cal_raw = m_cal.group(1)
+
     cal_date = normalize_date(cal_raw, filename=filename)
 
     return {
@@ -881,6 +989,7 @@ def extract_ccic(text, text_clean, ledger, filename=""):
 def extract_generic(text, text_clean, ledger, filename=""):
     asset_no = None
     serial_no = ""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
     
     if filename:
         m_fn = re.search(r'[(（]([A-Za-z0-9\-]+)[)）]', filename)
@@ -897,13 +1006,34 @@ def extract_generic(text, text_clean, ledger, filename=""):
                 break
 
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
-    info = ledger.query(asset_no=asset_no, serial_no=serial_no)
 
-    inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+    inst_name = ''
+    for i, l in enumerate(lines):
+        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
+            cand = lines[i+1].strip()
+            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+                inst_name = cand
+                break
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+
     cal_raw = ""
-    m_cal = re.search(r'校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text)
-    if m_cal:
-        cal_raw = m_cal.group(1)
+    for i, l in enumerate(lines):
+        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                if m_d:
+                    cal_raw = m_d.group(1)
+                    break
+            if cal_raw: break
+
+    if not cal_raw:
+        m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
+        if m_cal and m_cal.group(1):
+            cal_raw = m_cal.group(1)
+
     cal_date = normalize_date(cal_raw, filename=filename)
 
     return {

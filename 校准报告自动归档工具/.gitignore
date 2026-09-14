@@ -1,0 +1,23 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*.class
+*.log
+
+# PyInstaller Build artifacts
+build/
+dist/
+*.exe
+*.spec
+
+# Temporary zip and excel outputs
+*.zip
+_temp_zip_extracted_/
+本次扫描_*.xlsx
+本次处理_*.txt
+*.tmp
+
+# Local archives and testing data (avoid committing huge PDF files)
+【归档完成】校准证书库/
+*校准证书/
+未分类设备/

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FQT 实验室校准证书智能归档与量值溯源工作台 V2.0
+FQT 实验室校准证书智能归档与量值溯源工作台 V2.1
 ======================================================================
 1. 【现代化双轨工作台架构】
    - 🏢 17025定量实验室设备校准工作台
@@ -193,7 +193,7 @@ def init_rapidocr():
 
 ocr_engine, HAS_OCR = init_rapidocr()
 
-VERSION = "V2.0"
+VERSION = "V2.1"
 APP_NAME = "FQT 实验室校准证书智能归档与管理工作台"
 
 STANDARD_GROUPS = [
@@ -201,6 +201,38 @@ STANDARD_GROUPS = [
     '液相组', '气相组', '元素组',
     '抽样组', '综合组', '运行组',
     '质保部', '报告组'
+]
+
+DN_STATIONS = [
+    ('安庆', '安庆市场组'),
+    ('蚌埠', '蚌埠市场组'),
+    ('西安', '西安项目组'),
+    ('西北农副', '西安项目组'),
+    ('成都', '成都项目组'),
+    ('南昌', '南昌项目组'),
+    ('青云谱', '南昌项目组'),
+    ('昌南', '南昌项目组'),
+    ('果菜', '果菜配送中心'),
+    ('坂田', '坂田街道'),
+    ('龙田', '龙田街道'),
+    ('横岗', '横岗街道'),
+    ('南湾', '南湾街道'),
+    ('碧岭', '碧岭街道'),
+    ('布吉高中', '布吉高级中学'),
+    ('布吉高级中学', '布吉高级中学'),
+    ('布吉', '布吉市场组'),
+    ('龙华', '龙华区委'),
+    ('罗芳', '罗芳市场组'),
+    ('大东', '大东市场'),
+    ('大学城', '大学城驻点'),
+    ('惠阳', '惠阳项目组'),
+    ('快筛一组', '快筛一组'),
+    ('快筛二组', '快筛二组'),
+    ('快筛三组', '快筛三组'),
+    ('快检一组', '快检一组'),
+    ('快检二组', '快检二组'),
+    ('快检三组', '快检三组'),
+    ('平湖', '快检一组'),
 ]
 
 ISSUER_LABEL = {
@@ -599,16 +631,56 @@ class LedgerDatabase:
 # 各大计量校准机构高精字段解析器
 # ============================================================
 
-def extract_dn(text, text_clean, ledger, filename=""):
+def extract_dn(text, text_clean, ledger, filename="", doc=None):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     asset_no = None
     serial_no = ""
+    blocks = doc[0].get_text('blocks') if (doc and len(doc) > 0) else []
 
+    # 1. 优先从台账检索已知的设备资产编号
     for asset in ledger.sorted_asset_list:
         if re.search(r'\b' + re.escape(asset) + r'\b', text, re.I) or (filename and asset in filename):
             asset_no = asset
             break
 
+    # 2. 空间结构抽取管理号与出厂编号
+    if (not asset_no or asset_no == '未知编号') and blocks:
+        for b in blocks:
+            if 400 <= b[1] <= 475 and 320 <= b[0] <= 500:
+                t = b[4].strip().replace('\n', '')
+                if t and t != '/' and not re.match(r'^(Asset|Serial|Model|出厂|管理|器\s*具)', t, re.I):
+                    asset_no = t
+                    break
+    if not serial_no and blocks:
+        for b in blocks:
+            if 400 <= b[1] <= 475 and 130 <= b[0] <= 310:
+                t = b[4].strip().replace('\n', '')
+                if t and t != '/' and not re.match(r'^(Asset|Serial|Model|出厂|管理)', t, re.I):
+                    serial_no = t
+                    break
+
+    # 3. 文本行后备检索
+    if not asset_no:
+        for i, l in enumerate(lines):
+            if re.search(r'管\s*理\s*号|Asset\s*No|器\s*具\s*编\s*号', l, re.I):
+                for j in range(i+1, min(i+4, len(lines))):
+                    cand = lines[j].strip()
+                    if re.search(r'[A-Za-z0-9]', cand) and not any(k in cand for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial', 'Asset', 'JJG', 'JJF']):
+                        asset_no = cand
+                        break
+                if asset_no: break
+
+    if not serial_no:
+        for i, l in enumerate(lines):
+            if re.search(r'出\s*厂\s*编\s*号|Serial\s*No\.?', l, re.I):
+                for j in range(i+1, min(i+4, len(lines))):
+                    cand = lines[j].strip()
+                    if re.search(r'[A-Za-z0-9]', cand) and not any(k in cand for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial', 'Asset', 'JJG', 'JJF']):
+                        serial_no = cand
+                        break
+                if serial_no: break
+
+    # 4. 文件名兜底
     if not asset_no and filename:
         parts = os.path.splitext(filename)[0].split('_')
         for p in parts:
@@ -621,90 +693,110 @@ def extract_dn(text, text_clean, ledger, filename=""):
             if m_paren:
                 asset_no = m_paren.group(1).strip()
 
-    if not asset_no:
-        for i, l in enumerate(lines):
-            if re.search(r'管\s*理\s*号|Asset\s*No|器\s*具\s*编\s*号', l, re.I):
-                for j in range(i+1, min(i+4, len(lines))):
-                    cand = lines[j].strip()
-                    if re.search(r'[A-Za-z0-9]', cand) and not any(k in cand for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial', 'Asset', 'JJG', 'JJF']):
-                        asset_no = cand
-                        break
-                if asset_no: break
-
-    for i, l in enumerate(lines):
-        if re.search(r'出\s*厂\s*编\s*号|Serial\s*No\.?', l, re.I):
-            for j in range(i+1, min(i+4, len(lines))):
-                cand = lines[j].strip()
-                if re.search(r'[A-Za-z0-9]', cand) and not any(k in cand for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial', 'Asset', 'JJG', 'JJF']):
-                    serial_no = cand
-                    break
-            if serial_no: break
-
     if not asset_no and serial_no:
         asset_no = serial_no
 
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
 
+    # 5. 校准日期抽取 (空间坐标精确定位 + 正则双保险)
     cal_raw = ""
-    for i, l in enumerate(lines):
-        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
-            for j in range(i+1, min(i+4, len(lines))):
-                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
-                if m_d:
-                    cal_raw = m_d.group(1)
+    if blocks:
+        for b in blocks:
+            if 480 <= b[1] <= 565 and 130 <= b[0] <= 310:
+                m = re.search(r'(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})', b[4])
+                if m:
+                    cal_raw = m.group(1)
                     break
-            if cal_raw: break
+    if not cal_raw:
+        for i, l in enumerate(lines):
+            if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
+                for j in range(i+1, min(i+4, len(lines))):
+                    m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                    if m_d:
+                        cal_raw = m_d.group(1)
+                        break
+                if cal_raw: break
     if not cal_raw:
         m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
         if m_cal and m_cal.group(1):
             cal_raw = m_cal.group(1)
     cal_date = normalize_date(cal_raw, filename=filename)
 
+    # 6. 签发日期抽取
     issue_raw = ""
-    for i, l in enumerate(lines):
-        if re.search(r'(?:Date of Issue|签\s*发\s*日\s*期|批\s*准\s*日\s*期|发布日期|Issued Date)', l, re.I):
-            for j in range(i+1, min(i+4, len(lines))):
-                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
-                if m_d:
-                    issue_raw = m_d.group(1)
+    if blocks:
+        for b in blocks:
+            if 480 <= b[1] <= 565 and 310 <= b[0] <= 500:
+                m = re.search(r'(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})', b[4])
+                if m:
+                    issue_raw = m.group(1)
                     break
-            if issue_raw: break
     if not issue_raw:
-        m_iss = re.search(r'(?:签\s*发\s*日\s*期|批\s*准\s*日\s*期|发布日期|Issued Date)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
-        if m_iss and m_iss.group(1):
-            issue_raw = m_iss.group(1)
-        elif filename:
-            dates_in_fn = re.findall(r'\b(20\d{2}[01]\d[0-3]\d)\b', os.path.basename(filename))
-            if len(dates_in_fn) >= 2:
-                issue_raw = dates_in_fn[1]
+        for i, l in enumerate(lines):
+            if re.search(r'(?:Date of Issue|签\s*发\s*日\s*期|批\s*准\s*日\s*期|发布日期|Issued Date)', l, re.I):
+                for j in range(i+1, min(i+4, len(lines))):
+                    m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                    if m_d:
+                        issue_raw = m_d.group(1)
+                        break
+                if issue_raw: break
+    if not issue_raw and filename:
+        dates_in_fn = re.findall(r'\b(20\d{2}[01]\d[0-3]\d)\b', os.path.basename(filename))
+        if len(dates_in_fn) >= 2:
+            issue_raw = dates_in_fn[1]
     issue_date = normalize_date(issue_raw, filename=filename)
 
+    # 7. 仪器名称抽取 (避开 'Description' 标签)
     inst_name = ''
-    for i, l in enumerate(lines):
-        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
-            cand = lines[i+1].strip()
-            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+    if blocks:
+        for b in blocks:
+            if 290 <= b[1] <= 370 and 130 <= b[0] <= 340:
+                t = b[4].strip().replace('\n', '')
+                if t and t != 'Description' and not re.match(r'^(Model|Serial|Asset|Manufacturer|Type|型号|出厂|管理)', t, re.I):
+                    inst_name = t
+                    break
+    if not inst_name or inst_name == 'Description':
+        if filename and '_DN' in filename:
+            cand = filename.split('_DN')[0].strip()
+            if cand and not cand.startswith('DN'):
                 inst_name = cand
-                break
 
     info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
     if (not asset_no or asset_no == '未知编号') and info.get('asset_no') != '未知编号':
         asset_no = info.get('asset_no')
 
-    lab_name = info.get('lab') or '未知实验室'
-    if (lab_name == '未知实验室' or lab_name == '定量实验室') and filename:
-        parts = os.path.splitext(filename)[0].split('_')
-        if len(parts) >= 2 and not re.match(r'^(20\d{2}|H\d+|YYQ|KJ|WJ|\d+$)', parts[0]):
-            lab_name = parts[0]
-
-    if not inst_name or inst_name == '未查找到':
-        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else ''
+    if not inst_name or inst_name in {'未查找到', 'Description'}:
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None', 'Description'} else ''
     if not inst_name and filename:
         parts = os.path.splitext(filename)[0].split('_')
         if len(parts) >= 3 and not re.match(r'^\d+$', parts[-1]):
             inst_name = parts[-1]
-
     inst_name = inst_name or '未查找到'
+
+    # 8. 组别与驻点智能解析 (台账 + 地址全景匹配)
+    lab_name = info.get('lab') or '未知实验室'
+    group_name = info.get('group') or '未知组别'
+
+    doc_full_text = text
+    if doc and len(doc) > 1:
+        try:
+            doc_full_text += '\n' + doc[1].get_text('text')
+        except Exception:
+            pass
+
+    if group_name in {'未知组别', '未知', '未知实验室', '定量实验室'}:
+        for kw, st in DN_STATIONS:
+            if kw in doc_full_text:
+                group_name = st
+                lab_name = st
+                break
+
+    if (lab_name == '未知实验室' or lab_name == '定量实验室') and filename:
+        parts = os.path.splitext(filename)[0].split('_')
+        if len(parts) >= 2 and not re.match(r'^(20\d{2}|H\d+|YYQ|KJ|WJ|\d+$)', parts[0]):
+            lab_name = parts[0]
+            if group_name == '未知组别':
+                group_name = parts[0]
 
     return {
         'asset_no': asset_no or '未知编号',
@@ -713,14 +805,15 @@ def extract_dn(text, text_clean, ledger, filename=""):
         'lab_name': lab_name,
         'cal_date': cal_date,
         'issue_date': issue_date,
-        'group': info.get('group', lab_name),
-        'device_type': info.get('type', '快检')
+        'group': group_name,
+        'device_type': '快检' if info.get('type') == '快检' or group_name != '定量实验室' else '定量'
     }
 
-def extract_daf(text, text_clean, ledger, filename=""):
+def extract_daf(text, text_clean, ledger, filename="", doc=None):
     asset_no = None
     serial_no = ""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
+    blocks = doc[0].get_text('blocks') if (doc and len(doc) > 0) else []
 
     for i, l in enumerate(lines):
         if re.search(r'出\s*厂\s*编\s*号|Serial\s*No\.?', l, re.I) and not serial_no:
@@ -735,6 +828,22 @@ def extract_daf(text, text_clean, ledger, filename=""):
                 if re.search(r'[A-Za-z0-9]', cand) and not re.match(r'^(JJF|JJG|GB|CNAS|DAF)', cand, re.I) and not any(k in cand for k in ['Date', 'Model', 'Manufacturer', 'Description', 'Serial', 'Asset']):
                     asset_no = cand
                     break
+
+    if blocks:
+        if not asset_no or asset_no == '未知编号':
+            for b in blocks:
+                if 380 <= b[1] <= 475 and 320 <= b[0] <= 520:
+                    t = b[4].strip().replace('\n', '')
+                    if t and t != '/' and not re.match(r'^(Asset|Serial|Model|出厂|管理)', t, re.I):
+                        asset_no = t
+                        break
+        if not serial_no:
+            for b in blocks:
+                if 380 <= b[1] <= 475 and 130 <= b[0] <= 320:
+                    t = b[4].strip().replace('\n', '')
+                    if t and t != '/' and not re.match(r'^(Asset|Serial|Model|出厂|管理)', t, re.I):
+                        serial_no = t
+                        break
 
     if serial_no:
         m_paren = re.search(r'^(.*?)[(（]([A-Za-z0-9\-]+)[)）]$', serial_no)
@@ -757,20 +866,20 @@ def extract_daf(text, text_clean, ledger, filename=""):
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
 
     inst_name = ''
-    for i, l in enumerate(lines):
-        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
-            cand = lines[i+1].strip()
-            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
-                inst_name = cand
-                break
-
-    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
-    if not asset_no or asset_no == '未知编号':
-        if info.get('asset_no') and info.get('asset_no') != '未知编号':
-            asset_no = info.get('asset_no')
-
-    if not inst_name or inst_name == '未查找到':
-        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+    if blocks:
+        for b in blocks:
+            if 250 <= b[1] <= 360 and 130 <= b[0] <= 350:
+                t = b[4].strip().replace('\n', '')
+                if t and t != 'Description' and not re.match(r'^(Model|Serial|Asset|Manufacturer|Type|型号|出厂|管理)', t, re.I):
+                    inst_name = t
+                    break
+    if not inst_name or inst_name == 'Description':
+        for i, l in enumerate(lines):
+            if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
+                cand = lines[i+1].strip()
+                if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+                    inst_name = cand
+                    break
 
     cal_raw = ""
     for i, l in enumerate(lines):
@@ -782,12 +891,28 @@ def extract_daf(text, text_clean, ledger, filename=""):
                     break
             if cal_raw: break
 
+    if not cal_raw and blocks:
+        for b in blocks:
+            if 420 <= b[1] <= 560:
+                m = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', b[4])
+                if m:
+                    cal_raw = m.group(1)
+                    break
+
     if not cal_raw:
         m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
         if m_cal and m_cal.group(1):
             cal_raw = m_cal.group(1)
 
     cal_date = normalize_date(cal_raw, filename=filename)
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
+    if not asset_no or asset_no == '未知编号':
+        if info.get('asset_no') and info.get('asset_no') != '未知编号':
+            asset_no = info.get('asset_no')
+
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
 
     return {
         'asset_no': asset_no or serial_no or '未知编号',
@@ -799,7 +924,7 @@ def extract_daf(text, text_clean, ledger, filename=""):
         'device_type': info.get('type', '定量')
     }
 
-def extract_nem(text, text_clean, ledger, filename=""):
+def extract_nem(text, text_clean, ledger, filename="", doc=None):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     desc, model, raw_sn, cal_date, issue_date = '', '', '', '', ''
     for i, l in enumerate(lines):
@@ -869,7 +994,7 @@ def extract_nem(text, text_clean, ledger, filename=""):
         'device_type': info.get('type', '定量')
     }
 
-def extract_smq(text, text_clean, ledger, filename=""):
+def extract_smq(text, text_clean, ledger, filename="", doc=None):
     asset_no = None
     serial_no = ""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -931,7 +1056,7 @@ def extract_smq(text, text_clean, ledger, filename=""):
         'device_type': info.get('type', '定量')
     }
 
-def extract_ccic(text, text_clean, ledger, filename=""):
+def extract_ccic(text, text_clean, ledger, filename="", doc=None):
     asset_no = None
     serial_no = ""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -986,7 +1111,7 @@ def extract_ccic(text, text_clean, ledger, filename=""):
         'device_type': info.get('type', '定量')
     }
 
-def extract_generic(text, text_clean, ledger, filename=""):
+def extract_generic(text, text_clean, ledger, filename="", doc=None):
     asset_no = None
     serial_no = ""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -1302,22 +1427,26 @@ class ArchiveWorker(QThread):
 
             text = ""
             used_ocr = False
+            doc = None
             try:
                 if fitz is not None:
-                    with fitz.open(pdf_path) as doc:
-                        for p_i in range(min(3, len(doc))):
-                            page = doc[p_i]
-                            p_text = page.get_text("text") or ''
-                            if is_text_garbled_or_image(p_text, min_chinese=4) and self.enable_ocr and HAS_OCR and ocr_engine:
-                                pix = page.get_pixmap(dpi=200)
-                                ocr_res, _ = ocr_engine(pix.tobytes("png"))
-                                if ocr_res:
-                                    p_text = '\n'.join([line[1] for line in ocr_res])
-                                    used_ocr = True
-                            text += p_text + '\n'
+                    doc = fitz.open(pdf_path)
+                    for p_i in range(min(3, len(doc))):
+                        page = doc[p_i]
+                        p_text = page.get_text("text") or ''
+                        if is_text_garbled_or_image(p_text, min_chinese=4) and self.enable_ocr and HAS_OCR and ocr_engine:
+                            pix = page.get_pixmap(dpi=200)
+                            ocr_res, _ = ocr_engine(pix.tobytes("png"))
+                            if ocr_res:
+                                p_text = '\n'.join([line[1] for line in ocr_res])
+                                used_ocr = True
+                        text += p_text + '\n'
             except Exception as e:
                 self.log_signal.emit("ERROR", f"❌ 读取失败 [{filename}]: {e}")
                 error_count += 1
+                if doc is not None:
+                    try: doc.close()
+                    except Exception: pass
                 continue
 
             text_clean = text.replace(' ', '').replace('\n', '')
@@ -1325,7 +1454,7 @@ class ArchiveWorker(QThread):
             if (len(text_clean.strip()) < 30 or identify_issuer(text_clean) == 'UNKNOWN' or is_text_garbled_or_image(text, min_chinese=6)) and self.enable_ocr and HAS_OCR and ocr_engine and not used_ocr:
                 try:
                     ocr_total = ""
-                    with fitz.open(pdf_path) as doc:
+                    if doc is not None:
                         for p_i in range(min(2, len(doc))):
                             pix = doc[p_i].get_pixmap(dpi=200)
                             ocr_res, _ = ocr_engine(pix.tobytes("png"))
@@ -1339,12 +1468,12 @@ class ArchiveWorker(QThread):
                     pass
 
             issuer = identify_issuer(text_clean)
-            if issuer == 'DN': fields = extract_dn(text, text_clean, ledger, filename=filename)
-            elif issuer == 'DAF': fields = extract_daf(text, text_clean, ledger, filename=filename)
-            elif issuer == 'NEM': fields = extract_nem(text, text_clean, ledger, filename=filename)
-            elif issuer == 'SMQ': fields = extract_smq(text, text_clean, ledger, filename=filename)
-            elif issuer == 'CCIC': fields = extract_ccic(text, text_clean, ledger, filename=filename)
-            else: fields = extract_generic(text, text_clean, ledger, filename=filename)
+            if issuer == 'DN': fields = extract_dn(text, text_clean, ledger, filename=filename, doc=doc)
+            elif issuer == 'DAF': fields = extract_daf(text, text_clean, ledger, filename=filename, doc=doc)
+            elif issuer == 'NEM': fields = extract_nem(text, text_clean, ledger, filename=filename, doc=doc)
+            elif issuer == 'SMQ': fields = extract_smq(text, text_clean, ledger, filename=filename, doc=doc)
+            elif issuer == 'CCIC': fields = extract_ccic(text, text_clean, ledger, filename=filename, doc=doc)
+            else: fields = extract_generic(text, text_clean, ledger, filename=filename, doc=doc)
 
             if (not fields.get('group') or fields.get('group') in {'未知组别', '未知'}) and filename:
                 for g in STANDARD_GROUPS:
@@ -1362,7 +1491,7 @@ class ArchiveWorker(QThread):
             if (fields.get('asset_no') in {'未知编号', '未查找到'} or fields.get('inst_name') == '未查找到') and self.enable_ocr and HAS_OCR and ocr_engine and not used_ocr:
                 try:
                     ocr_total = ""
-                    with fitz.open(pdf_path) as doc:
+                    if doc is not None:
                         for p_i in range(min(2, len(doc))):
                             pix = doc[p_i].get_pixmap(dpi=200)
                             ocr_res, _ = ocr_engine(pix.tobytes("png"))
@@ -1372,15 +1501,20 @@ class ArchiveWorker(QThread):
                         text = ocr_total
                         text_clean = text.replace(' ', '').replace('\n', '')
                         issuer = identify_issuer(text_clean)
-                        if issuer == 'DN': fields = extract_dn(text, text_clean, ledger, filename=filename)
-                        elif issuer == 'DAF': fields = extract_daf(text, text_clean, ledger, filename=filename)
-                        elif issuer == 'NEM': fields = extract_nem(text, text_clean, ledger, filename=filename)
-                        elif issuer == 'SMQ': fields = extract_smq(text, text_clean, ledger, filename=filename)
-                        elif issuer == 'CCIC': fields = extract_ccic(text, text_clean, ledger, filename=filename)
-                        else: fields = extract_generic(text, text_clean, ledger, filename=filename)
+                        if issuer == 'DN': fields = extract_dn(text, text_clean, ledger, filename=filename, doc=doc)
+                        elif issuer == 'DAF': fields = extract_daf(text, text_clean, ledger, filename=filename, doc=doc)
+                        elif issuer == 'NEM': fields = extract_nem(text, text_clean, ledger, filename=filename, doc=doc)
+                        elif issuer == 'SMQ': fields = extract_smq(text, text_clean, ledger, filename=filename, doc=doc)
+                        elif issuer == 'CCIC': fields = extract_ccic(text, text_clean, ledger, filename=filename, doc=doc)
+                        else: fields = extract_generic(text, text_clean, ledger, filename=filename, doc=doc)
                         used_ocr = True
                 except Exception:
                     pass
+
+            if doc is not None:
+                try: doc.close()
+                except Exception: pass
+                doc = None
 
             label = ISSUER_LABEL.get(issuer, '未知机构')
             device_type = fields.get('device_type', '未知')
@@ -1541,7 +1675,7 @@ class MainWindow(QMainWindow):
         logo_box.setSpacing(4)
         app_title = QLabel("FQT 质量工作台")
         app_title.setObjectName("sidebarAppTitle")
-        app_subtitle = QLabel(f"校准管理与自动归档 {VERSION}")
+        app_subtitle = QLabel(f"校准管理与自动归档 {VERSION} · Antigravity 暗夜模式")
         app_subtitle.setObjectName("sidebarAppSubtitle")
         logo_box.addWidget(app_title)
         logo_box.addWidget(app_subtitle)
@@ -1681,22 +1815,28 @@ class MainWindow(QMainWindow):
             self.lbl_k_groups = lbl_groups
             self.lbl_k_time = lbl_time
 
-        def make_metric(title, val_lbl, grad_css, text_color):
+        def make_metric(title, val_lbl, badge_tag, text_color):
             f = QFrame()
-            f.setStyleSheet(f"QFrame {{ background: {grad_css}; border-radius: 10px; border: 1px solid rgba(0,0,0,0.06); padding: 12px; }}")
+            f.setStyleSheet("QFrame { background: #18191E; border-radius: 8px; border: 1px solid #282A33; padding: 12px; }")
             vb = QVBoxLayout(f)
-            vb.setSpacing(2)
+            vb.setSpacing(4)
+            top_h = QHBoxLayout()
             t = QLabel(title)
-            t.setStyleSheet("font-size: 12px; font-weight: 600; color: #475569;")
+            t.setStyleSheet("font-size: 12px; font-weight: 600; color: #9CA3AF;")
+            top_h.addWidget(t)
+            top_h.addStretch()
+            badge = QLabel(badge_tag)
+            badge.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_color}; background-color: rgba(59, 130, 246, 0.12); padding: 2px 6px; border-radius: 4px; border: 1px solid {text_color}44;")
+            top_h.addWidget(badge)
             val_lbl.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {text_color};")
-            vb.addWidget(t)
+            vb.addLayout(top_h)
             vb.addWidget(val_lbl)
             return f
 
-        metrics_grid.addWidget(make_metric("📦 扫描证书总数", lbl_total, "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #EFF6FF, stop:1 #DBEAFE)", "#1E40AF"), 0, 0)
-        metrics_grid.addWidget(make_metric("✅ 台账精准匹配", lbl_matched, "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #ECFDF5, stop:1 #D1FAE5)", "#065F46"), 0, 1)
-        metrics_grid.addWidget(make_metric("🔬 覆盖组别/驻点", lbl_groups, "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #FFFBEB, stop:1 #FEF3C7)", "#92400E"), 0, 2)
-        metrics_grid.addWidget(make_metric("⏱️ 处理任务耗时", lbl_time, "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F8FAFC, stop:1 #F1F5F9)", "#334155"), 0, 3)
+        metrics_grid.addWidget(make_metric("📦 扫描证书总数", lbl_total, "[总量]", "#3B82F6"), 0, 0)
+        metrics_grid.addWidget(make_metric("✅ 台账精准匹配", lbl_matched, "[已核对]", "#34D399"), 0, 1)
+        metrics_grid.addWidget(make_metric("🔬 覆盖组别/驻点", lbl_groups, "[组别/站]", "#FBBF24"), 0, 2)
+        metrics_grid.addWidget(make_metric("⏱️ 处理任务耗时", lbl_time, "[耗时]", "#E4E4E7"), 0, 3)
 
         layout.addLayout(metrics_grid)
 
@@ -2067,14 +2207,21 @@ class MainWindow(QMainWindow):
 
     def append_log(self, level, message):
         color_map = {
-            "INFO": "#334155",
-            "SUCCESS": "#16A34A",
-            "WARN": "#D97706",
-            "ERROR": "#DC2626"
+            "INFO": "#E4E4E7",
+            "SUCCESS": "#60A5FA",
+            "WARN": "#FBBF24",
+            "ERROR": "#F87171"
         }
-        color = color_map.get(level, "#334155")
+        tag_map = {
+            "INFO": "[信息]",
+            "SUCCESS": "[成功]",
+            "WARN": "[警告]",
+            "ERROR": "[错误]"
+        }
+        color = color_map.get(level, "#E4E4E7")
+        tag = tag_map.get(level, f"[{level}]")
         now_time = datetime.datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f'<span style="color:#94A3B8;">[{now_time}]</span> <span style="color:{color}; font-weight:600;">{message}</span>')
+        self.log_text.append(f'<span style="color:#71717A;">[{now_time}]</span> <span style="color:{color}; font-weight:bold;">{tag}</span> <span style="color:{color};">{message}</span>')
 
     def start_worker(self, is_quant=True):
         if is_quant:
@@ -2148,15 +2295,28 @@ class MainWindow(QMainWindow):
         self.records_cache.append(rec)
         r = table.rowCount()
         table.insertRow(r)
-        table.setItem(r, 0, QTableWidgetItem(str(rec['序号'])))
-        table.setItem(r, 1, QTableWidgetItem(rec['原始文件名']))
-        table.setItem(r, 2, QTableWidgetItem(rec['最终重命名']))
-        table.setItem(r, 3, QTableWidgetItem(rec['机构']))
-        table.setItem(r, 4, QTableWidgetItem(rec['设备编号']))
-        table.setItem(r, 5, QTableWidgetItem(rec['出厂编号']))
-        table.setItem(r, 6, QTableWidgetItem(rec['仪器名称']))
-        table.setItem(r, 7, QTableWidgetItem(rec['校准日期']))
-        table.setItem(r, 8, QTableWidgetItem(rec['所属组别/实验室']))
+        
+        items = [
+            str(rec['序号']),
+            rec['原始文件名'],
+            rec['最终重命名'],
+            rec['机构'],
+            rec['设备编号'],
+            rec['出厂编号'],
+            rec['仪器名称'],
+            rec['校准日期'],
+            rec['所属组别/实验室']
+        ]
+        
+        for c, text_val in enumerate(items):
+            item = QTableWidgetItem(str(text_val))
+            item.setToolTip(str(text_val))
+            if c in (0, 3, 4, 7):
+                item.setTextAlignment(Qt.AlignCenter)
+            else:
+                item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+            table.setItem(r, c, item)
+            
         table.scrollToBottom()
 
     def on_worker_finished(self, summary, is_quant):
@@ -2262,46 +2422,47 @@ class MainWindow(QMainWindow):
             QWidget {
                 font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", sans-serif;
                 font-size: 13px;
-                color: #1E293B;
+                color: #F4F4F5;
             }
             QWidget#centralWidget {
-                background-color: #F1F5F9;
+                background-color: #121316;
             }
             #navSidebar {
-                background-color: #0F172A;
-                border-right: 1px solid #1E293B;
+                background-color: #16171B;
+                border-right: 1px solid #27282D;
             }
             #sidebarAppTitle {
-                color: #FFFFFF;
-                font-size: 17px;
+                color: #F4F4F5;
+                font-size: 16px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
             }
             #sidebarAppSubtitle {
-                color: #94A3B8;
+                color: #9CA3AF;
                 font-size: 11px;
             }
             #navButton {
                 text-align: left;
                 padding-left: 14px;
-                color: #94A3B8;
+                color: #9CA3AF;
                 font-size: 13px;
                 font-weight: 600;
                 background-color: transparent;
-                border-radius: 8px;
+                border-radius: 6px;
                 border: none;
             }
             #navButton:hover {
-                background-color: #1E293B;
-                color: #F8FAFC;
+                background-color: #22242B;
+                color: #F4F4F5;
             }
             #navButton:checked {
-                background-color: #0284C7;
+                background-color: #3B82F6;
                 color: #FFFFFF;
                 font-weight: bold;
             }
             #sidebarStatusCard {
-                background-color: #1E293B;
+                background-color: #1A1B20;
+                border: 1px solid #282A33;
                 border-radius: 8px;
             }
             #sidebarOcrLabel {
@@ -2310,133 +2471,242 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
             }
             #sidebarPdfLabel {
-                color: #4ADE80;
+                color: #34D399;
                 font-size: 11px;
             }
             #bannerCard {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1E293B, stop:1 #0F172A);
-                border-radius: 12px;
+                background-color: #18191E;
+                border: 1px solid #2A2C34;
+                border-radius: 10px;
             }
             #bannerTitle {
-                color: #FFFFFF;
+                color: #F4F4F5;
                 font-size: 18px;
                 font-weight: bold;
             }
             #bannerSubtitle {
-                color: #94A3B8;
+                color: #9CA3AF;
                 font-size: 12px;
             }
             #badgeType {
-                background-color: rgba(2, 132, 199, 0.25);
-                color: #38BDF8;
-                padding: 6px 14px;
-                border-radius: 14px;
+                background-color: rgba(59, 130, 246, 0.18);
+                color: #60A5FA;
+                padding: 5px 14px;
+                border-radius: 6px;
                 font-size: 12px;
                 font-weight: bold;
-                border: 1px solid rgba(56, 189, 248, 0.4);
+                border: 1px solid #3B82F6;
             }
             #modernCard {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 12px;
+                background-color: #18191E;
+                border: 1px solid #282A33;
+                border-radius: 10px;
             }
             #cardTitle {
                 font-size: 14px;
                 font-weight: bold;
-                color: #0F172A;
+                color: #F4F4F5;
             }
             #formLabel {
                 font-weight: bold;
-                color: #334155;
+                color: #D4D4D8;
             }
             QLineEdit, QComboBox {
                 padding: 7px 12px;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
-                background: #FFFFFF;
+                border: 1px solid #32353E;
+                border-radius: 6px;
+                background-color: #1A1B20;
+                color: #F4F4F5;
                 font-size: 13px;
+                selection-background-color: #3B82F6;
             }
             QLineEdit:focus, QComboBox:focus {
-                border: 2px solid #0284C7;
-                background: #F8FAFC;
+                border: 2px solid #3B82F6;
+                background-color: #22242B;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1E1F26;
+                color: #F4F4F5;
+                selection-background-color: #3B82F6;
+                selection-color: #FFFFFF;
+                border: 1px solid #32353E;
+            }
+            QRadioButton, QCheckBox {
+                color: #E4E4E7;
+                font-size: 13px;
+                spacing: 6px;
+            }
+            QRadioButton::indicator, QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #4B5563;
+                border-radius: 3px;
+                background: #1A1B20;
+            }
+            QRadioButton::indicator:checked, QCheckBox::indicator:checked {
+                background-color: #3B82F6;
+                border-color: #3B82F6;
             }
             #btnOutline {
                 padding: 7px 16px;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
-                background-color: #FFFFFF;
-                font-weight: bold;
-                color: #334155;
+                border: 1px solid #383A44;
+                border-radius: 6px;
+                background-color: #202228;
+                font-weight: 600;
+                color: #E4E4E7;
             }
             #btnOutline:hover {
-                background-color: #F1F5F9;
-                border-color: #94A3B8;
+                background-color: #2A2C34;
+                border-color: #3B82F6;
+                color: #FFFFFF;
             }
             #btnPrimary {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284C7, stop:1 #0369A1);
-                color: white;
+                background-color: #3B82F6;
+                color: #FFFFFF;
                 font-size: 14px;
                 font-weight: bold;
-                border-radius: 8px;
+                border-radius: 6px;
                 border: none;
             }
             #btnPrimary:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0369A1, stop:1 #075985);
+                background-color: #2563EB;
+            }
+            #btnPrimary:pressed {
+                background-color: #1D4ED8;
+            }
+            #btnPrimary:disabled {
+                background-color: #2A3548;
+                color: #64748B;
             }
             #btnDanger {
-                background-color: #EF4444;
-                color: white;
+                background-color: #DC2626;
+                color: #FFFFFF;
+                font-size: 13px;
                 font-weight: bold;
-                border-radius: 8px;
+                border-radius: 6px;
                 border: none;
             }
             #btnDanger:hover {
-                background-color: #DC2626;
+                background-color: #B91C1C;
+            }
+            #btnDanger:disabled {
+                background-color: #3D1C1C;
+                color: #64748B;
             }
             #btnAction {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
-                color: #1E293B;
-                font-weight: bold;
+                background-color: #202228;
+                border: 1px solid #383A44;
+                border-radius: 6px;
+                color: #E4E4E7;
+                font-weight: 600;
+                font-size: 13px;
             }
             #btnAction:hover {
-                background-color: #F1F5F9;
-                border-color: #94A3B8;
+                background-color: #2A2C34;
+                border-color: #3B82F6;
+                color: #FFFFFF;
+            }
+            #btnAction:disabled {
+                background-color: #1A1B20;
+                border-color: #282A33;
+                color: #52525B;
             }
             QProgressBar {
-                border: none;
-                border-radius: 6px;
+                border: 1px solid #282A33;
+                border-radius: 4px;
                 text-align: center;
-                background-color: #E2E8F0;
+                background-color: #1A1B20;
+                color: #F4F4F5;
                 font-weight: bold;
             }
             QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284C7, stop:1 #10B981);
-                border-radius: 6px;
+                background-color: #3B82F6;
+                border-radius: 3px;
             }
             QTableWidget {
-                border: none;
-                background-color: #FFFFFF;
-                gridline-color: #F1F5F9;
+                border: 1px solid #282A33;
+                border-radius: 6px;
+                background-color: #16171B;
+                gridline-color: #26282E;
+                color: #F4F4F5;
                 font-size: 12px;
+                selection-background-color: #2563EB;
+                selection-color: #FFFFFF;
             }
             QHeaderView::section {
-                background-color: #F8FAFC;
-                color: #475569;
+                background-color: #202228;
+                color: #E4E4E7;
                 padding: 8px;
                 font-weight: bold;
                 border: none;
-                border-bottom: 2px solid #E2E8F0;
+                border-bottom: 2px solid #3B82F6;
             }
             #modernLogView {
-                border: 1px solid #E2E8F0;
-                border-radius: 10px;
-                background: #FFFFFF;
+                border: 1px solid #26282E;
+                border-radius: 8px;
+                background-color: #0E0F12;
+                color: #F4F4F5;
                 font-family: "Consolas", "Courier New", monospace;
                 font-size: 12px;
                 line-height: 1.5;
                 padding: 12px;
+            }
+            QScrollBar:vertical {
+                background-color: #16171B;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #32353E;
+                min-height: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #4B5563;
+            }
+            QScrollBar:horizontal {
+                background-color: #16171B;
+                height: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: #32353E;
+                min-width: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background-color: #4B5563;
+            }
+            QScrollBar::add-line, QScrollBar::sub-line {
+                width: 0px;
+                height: 0px;
+            }
+            QListWidget {
+                background-color: #1A1B20;
+                border: 1px solid #2E3038;
+                border-radius: 6px;
+                color: #F4F4F5;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #26282E;
+            }
+            QListWidget::item:selected {
+                background-color: #2563EB;
+                color: #FFFFFF;
+            }
+            QMessageBox, QDialog {
+                background-color: #1A1B20;
+                color: #F4F4F5;
+            }
+            QMenu {
+                background-color: #1E1F26;
+                color: #F4F4F5;
+                border: 1px solid #32353E;
+            }
+            QMenu::item:selected {
+                background-color: #2563EB;
+                color: #FFFFFF;
             }
         """)
 

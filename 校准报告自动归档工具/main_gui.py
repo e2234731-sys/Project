@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FQT 实验室校准证书智能归档与量值溯源工作台 V2.1
+FQT 实验室校准证书智能归档与量值溯源工作台 V2.2
 ======================================================================
 1. 【现代化双轨工作台架构】
    - 🏢 17025定量实验室设备校准工作台
@@ -193,7 +193,7 @@ def init_rapidocr():
 
 ocr_engine, HAS_OCR = init_rapidocr()
 
-VERSION = "V2.1"
+VERSION = "V2.2"
 APP_NAME = "FQT 实验室校准证书智能归档与管理工作台"
 
 STANDARD_GROUPS = [
@@ -1535,9 +1535,11 @@ class ArchiveWorker(QThread):
                 conflict_suffix += 1
 
             if self.mode == 'copy':
-                shutil.copy2(pdf_path, target_file_path)
+                action_txt = "📑 [已复制] 归档完成"
             elif self.mode == 'move':
-                shutil.move(pdf_path, target_file_path)
+                action_txt = "🚚 [已移动] 归档完成"
+            else:
+                action_txt = "🔍 [安全预览] 未改动"
 
             success_count += 1
             rel_archive_path = os.path.relpath(target_dir_path, self.archive_root).replace('\\', '/') if self.mode != 'dry_run' else target_dir_path.replace('\\', '/')
@@ -1546,8 +1548,11 @@ class ArchiveWorker(QThread):
             if code_val and code_val != '—':
                 scanned_asset_codes.add(code_val)
 
+            target_display = f"{rel_archive_path}/{new_filename}"
+
             record = {
                 '序号': success_count,
+                '处理状态': action_txt,
                 '原始文件名': filename,
                 '最终重命名': new_filename,
                 '机构': label,
@@ -1556,10 +1561,12 @@ class ArchiveWorker(QThread):
                 '仪器名称': fields.get('inst_name', '未查找到'),
                 '校准日期': fields.get('cal_date', '未知校准'),
                 '所属组别/实验室': fields.get('group') or fields.get('lab_name', '—'),
+                '目标归档位置': target_display,
                 '设备类型': device_type,
                 '源文件路径': os.path.abspath(pdf_path),
                 '归档目标目录': rel_archive_path,
                 '完整目标路径': os.path.abspath(target_file_path),
+                '归档模式': self.mode,
                 '解析方式': 'RapidOCR 视觉识别' if used_ocr else 'PyMuPDF 文本层'
             }
             records.append(record)
@@ -1612,6 +1619,7 @@ class ArchiveWorker(QThread):
                 tf.write(f"校准证书智能识别与质量台账核对清单 ({VERSION})\n")
                 tf.write(f"处理时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 tf.write(f"耗时：{time_cost:.2f} 秒\n")
+                tf.write(f"执行模式：{self.mode.upper()}\n")
                 tf.write(f"待处理扫描路径：{os.path.abspath(self.target_dir)}\n")
                 tf.write(f"归档目标总库：{os.path.abspath(self.archive_root)}\n")
                 tf.write("=" * 70 + "\n\n")
@@ -1628,7 +1636,10 @@ class ArchiveWorker(QThread):
             'time_cost': time_cost,
             'excel_path': excel_path,
             'txt_path': txt_path,
-            'error_count': error_count
+            'error_count': error_count,
+            'mode': self.mode,
+            'target_dir': self.target_dir,
+            'archive_root': self.archive_root
         })
 
 
@@ -1675,7 +1686,7 @@ class MainWindow(QMainWindow):
         logo_box.setSpacing(4)
         app_title = QLabel("FQT 质量工作台")
         app_title.setObjectName("sidebarAppTitle")
-        app_subtitle = QLabel(f"校准管理与自动归档 {VERSION} · Antigravity 暗夜模式")
+        app_subtitle = QLabel(f"校准管理与自动归档 {VERSION} · 实验室专业版")
         app_subtitle.setObjectName("sidebarAppSubtitle")
         logo_box.addWidget(app_title)
         logo_box.addWidget(app_subtitle)
@@ -1817,26 +1828,26 @@ class MainWindow(QMainWindow):
 
         def make_metric(title, val_lbl, badge_tag, text_color):
             f = QFrame()
-            f.setStyleSheet("QFrame { background: #18191E; border-radius: 8px; border: 1px solid #282A33; padding: 12px; }")
+            f.setStyleSheet("QFrame { background: #FFFFFF; border-radius: 8px; border: 1px solid #CBD5E1; padding: 12px; }")
             vb = QVBoxLayout(f)
             vb.setSpacing(4)
             top_h = QHBoxLayout()
             t = QLabel(title)
-            t.setStyleSheet("font-size: 12px; font-weight: 600; color: #9CA3AF;")
+            t.setStyleSheet("font-size: 12px; font-weight: 600; color: #475569;")
             top_h.addWidget(t)
             top_h.addStretch()
             badge = QLabel(badge_tag)
-            badge.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_color}; background-color: rgba(59, 130, 246, 0.12); padding: 2px 6px; border-radius: 4px; border: 1px solid {text_color}44;")
+            badge.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_color}; background-color: #F8FAFC; padding: 2px 6px; border-radius: 4px; border: 1px solid {text_color};")
             top_h.addWidget(badge)
             val_lbl.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {text_color};")
             vb.addLayout(top_h)
             vb.addWidget(val_lbl)
             return f
 
-        metrics_grid.addWidget(make_metric("📦 扫描证书总数", lbl_total, "[总量]", "#3B82F6"), 0, 0)
-        metrics_grid.addWidget(make_metric("✅ 台账精准匹配", lbl_matched, "[已核对]", "#34D399"), 0, 1)
-        metrics_grid.addWidget(make_metric("🔬 覆盖组别/驻点", lbl_groups, "[组别/站]", "#FBBF24"), 0, 2)
-        metrics_grid.addWidget(make_metric("⏱️ 处理任务耗时", lbl_time, "[耗时]", "#E4E4E7"), 0, 3)
+        metrics_grid.addWidget(make_metric("📦 扫描证书总数", lbl_total, "[总量]", "#0284C7"), 0, 0)
+        metrics_grid.addWidget(make_metric("✅ 台账精准匹配", lbl_matched, "[已核对]", "#059669"), 0, 1)
+        metrics_grid.addWidget(make_metric("🔬 覆盖组别/驻点", lbl_groups, "[组别/站]", "#D97706"), 0, 2)
+        metrics_grid.addWidget(make_metric("⏱️ 处理任务耗时", lbl_time, "[耗时]", "#0F172A"), 0, 3)
 
         layout.addLayout(metrics_grid)
 
@@ -1854,7 +1865,8 @@ class MainWindow(QMainWindow):
         p_grid = QGridLayout()
         p_grid.setSpacing(10)
         
-        lbl_in = QLabel("待识别目录:")
+        # 行 0: 待识别源目录
+        lbl_in = QLabel("待识别源目录:")
         lbl_in.setObjectName("formLabel")
         p_grid.addWidget(lbl_in, 0, 0)
 
@@ -1862,10 +1874,39 @@ class MainWindow(QMainWindow):
         in_edit.setPlaceholderText("选择或直接拖拽待处理校准证书文件夹...")
         p_grid.addWidget(in_edit, 0, 1)
 
-        btn_browse = QPushButton("📁 浏览目录")
-        btn_browse.setObjectName("btnOutline")
-        btn_browse.clicked.connect(lambda: self._browse_dir(in_edit))
-        p_grid.addWidget(btn_browse, 0, 2)
+        in_btn_box = QHBoxLayout()
+        in_btn_box.setSpacing(6)
+        btn_browse_in = QPushButton("📁 浏览目录")
+        btn_browse_in.setObjectName("btnOutline")
+        btn_browse_in.clicked.connect(lambda: self._browse_dir(in_edit))
+        btn_open_in = QPushButton("📂 打开源目录")
+        btn_open_in.setObjectName("btnOutline")
+        btn_open_in.clicked.connect(lambda: self._open_dir(in_edit.text()))
+        in_btn_box.addWidget(btn_browse_in)
+        in_btn_box.addWidget(btn_open_in)
+        p_grid.addLayout(in_btn_box, 0, 2)
+
+        # 行 1: 归档目标库 (明确展示文件保存位置)
+        lbl_out = QLabel("归档目标总库:")
+        lbl_out.setObjectName("formLabel")
+        p_grid.addWidget(lbl_out, 1, 0)
+
+        default_out = os.path.join(APP_ROOT, "【归档完成】校准证书库")
+        out_edit = QLineEdit(default_out)
+        out_edit.setPlaceholderText("规范重命名与归档后的存放总目录...")
+        p_grid.addWidget(out_edit, 1, 1)
+
+        out_btn_box = QHBoxLayout()
+        out_btn_box.setSpacing(6)
+        btn_browse_out = QPushButton("📁 更改目标")
+        btn_browse_out.setObjectName("btnOutline")
+        btn_browse_out.clicked.connect(lambda: self._browse_dir(out_edit))
+        btn_open_out = QPushButton("📂 打开目标库")
+        btn_open_out.setObjectName("btnOutline")
+        btn_open_out.clicked.connect(lambda: self._open_dir(out_edit.text()))
+        out_btn_box.addWidget(btn_browse_out)
+        out_btn_box.addWidget(btn_open_out)
+        p_grid.addLayout(out_btn_box, 1, 2)
 
         pc_layout.addLayout(p_grid)
 
@@ -1873,10 +1914,10 @@ class MainWindow(QMainWindow):
         mode_row = QHBoxLayout()
         mode_row.setSpacing(18)
         
-        rb_preview = QRadioButton("🔍 仅智能识别与结果返回 (安全预览/不改动文件)")
+        rb_preview = QRadioButton("🔍 仅智能识别与结果返回 (安全预览/不改动源文件)")
         rb_preview.setChecked(True)
-        rb_copy = QRadioButton("📑 复制并归档")
-        rb_move = QRadioButton("🚚 移动并归档")
+        rb_copy = QRadioButton("📑 复制并归档至目标库 (保留源文件)")
+        rb_move = QRadioButton("🚚 移动并归档至目标库 (源文件移至目标库)")
         
         btn_grp = QButtonGroup(self)
         btn_grp.addButton(rb_preview)
@@ -1898,6 +1939,29 @@ class MainWindow(QMainWindow):
         mode_row.addWidget(cb_unzip)
         pc_layout.addLayout(mode_row)
 
+        # 动态模式高亮提示卡片 (消除“文件到底改去哪里了”的混淆)
+        mode_hint = QLabel("💡 当前模式：【安全预览模式】—— 系统仅深度解析并生成比对审计报表，源文件原封不动，未重命名或移动任何文件！")
+        mode_hint.setWordWrap(True)
+        mode_hint.setStyleSheet("background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
+        pc_layout.addWidget(mode_hint)
+
+        def update_mode_hint():
+            dest_p = out_edit.text().strip() or os.path.join(APP_ROOT, "【归档完成】校准证书库")
+            if rb_preview.isChecked():
+                mode_hint.setText("💡 当前模式：【安全预览模式】—— 系统仅深度解析并生成比对审计报表，源文件原封不动，未重命名或移动任何文件！")
+                mode_hint.setStyleSheet("background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
+            elif rb_copy.isChecked():
+                mode_hint.setText(f"📑 当前模式：【复制归档模式】—— 证书将按规范重命名并【复制】至归档目标库对应分类子文件夹，原始文件完好保留！\n   归档目标根目录：{dest_p}")
+                mode_hint.setStyleSheet("background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
+            elif rb_move.isChecked():
+                mode_hint.setText(f"🚚 当前模式：【移动归档模式】—— 证书将按规范重命名并【剪切移动】至归档目标库对应分类子文件夹，源文件夹中不再保留！\n   归档目标根目录：{dest_p}")
+                mode_hint.setStyleSheet("background-color: #FEF3C7; color: #B45309; border: 1px solid #FDE68A; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
+
+        rb_preview.toggled.connect(update_mode_hint)
+        rb_copy.toggled.connect(update_mode_hint)
+        rb_move.toggled.connect(update_mode_hint)
+        out_edit.textChanged.connect(update_mode_hint)
+
         # 核心按钮栏
         ctrl_bar = QHBoxLayout()
         ctrl_bar.setSpacing(12)
@@ -1917,15 +1981,15 @@ class MainWindow(QMainWindow):
         btn_export.setFixedHeight(42)
         btn_export.setEnabled(False)
 
-        btn_open = QPushButton("📂 打开所在目录")
-        btn_open.setObjectName("btnAction")
-        btn_open.setFixedHeight(42)
-        btn_open.clicked.connect(lambda: self._open_dir(in_edit.text()))
+        btn_open_target = QPushButton("📂 打开归档目标库")
+        btn_open_target.setObjectName("btnAction")
+        btn_open_target.setFixedHeight(42)
+        btn_open_target.clicked.connect(lambda: self._open_dir(out_edit.text()))
 
         ctrl_bar.addWidget(btn_start, stretch=3)
         ctrl_bar.addWidget(btn_stop, stretch=1)
         ctrl_bar.addWidget(btn_export, stretch=2)
-        ctrl_bar.addWidget(btn_open, stretch=2)
+        ctrl_bar.addWidget(btn_open_target, stretch=2)
         pc_layout.addLayout(ctrl_bar)
 
         layout.addWidget(path_card)
@@ -1947,7 +2011,7 @@ class MainWindow(QMainWindow):
         filter_bar.setSpacing(10)
 
         search_edit = QLineEdit()
-        search_edit.setPlaceholderText("🔍 全局即时搜索：输入设备编号、仪器名称、出厂编号或组别...")
+        search_edit.setPlaceholderText("🔍 全局即时搜索：输入设备编号、仪器名称、出厂编号、组别或归档路径...")
         search_edit.setFixedHeight(34)
         filter_bar.addWidget(search_edit, stretch=2)
 
@@ -1961,21 +2025,23 @@ class MainWindow(QMainWindow):
 
         tc_layout.addLayout(filter_bar)
 
-        table = QTableWidget(0, 9)
+        table = QTableWidget(0, 11)
         table.setHorizontalHeaderLabels([
-            "序号", "原文件名", "规范命名/建议重命名", "机构",
-            "设备编号", "出厂编号", "仪器名称", "校准日期", "所属组别/驻点实验室"
+            "序号", "处理状态", "原文件名", "规范命名/建议重命名", "机构",
+            "设备编号", "出厂编号", "仪器名称", "校准日期", "所属组别/驻点", "归档目标位置"
         ])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        table.horizontalHeader().resizeSection(0, 50)
-        table.horizontalHeader().resizeSection(1, 240)
-        table.horizontalHeader().resizeSection(2, 260)
-        table.horizontalHeader().resizeSection(3, 100)
-        table.horizontalHeader().resizeSection(4, 100)
-        table.horizontalHeader().resizeSection(5, 100)
-        table.horizontalHeader().resizeSection(6, 140)
-        table.horizontalHeader().resizeSection(7, 90)
-        table.horizontalHeader().resizeSection(8, 140)
+        table.horizontalHeader().resizeSection(0, 48)
+        table.horizontalHeader().resizeSection(1, 120)
+        table.horizontalHeader().resizeSection(2, 220)
+        table.horizontalHeader().resizeSection(3, 250)
+        table.horizontalHeader().resizeSection(4, 85)
+        table.horizontalHeader().resizeSection(5, 90)
+        table.horizontalHeader().resizeSection(6, 110)
+        table.horizontalHeader().resizeSection(7, 130)
+        table.horizontalHeader().resizeSection(8, 90)
+        table.horizontalHeader().resizeSection(9, 120)
+        table.horizontalHeader().resizeSection(10, 260)
         table.setAlternatingRowColors(True)
         table.setContextMenuPolicy(Qt.CustomContextMenu)
         table.customContextMenuRequested.connect(lambda pos, t=table: self.show_table_menu(pos, t))
@@ -1994,6 +2060,7 @@ class MainWindow(QMainWindow):
             self.btn_q_export = btn_export
             self.prog_quant = prog_bar
             self.in_edit_quant = in_edit
+            self.out_edit_quant = out_edit
             self.rb_q_preview = rb_preview
             self.rb_q_copy = rb_copy
             self.rb_q_move = rb_move
@@ -2008,6 +2075,7 @@ class MainWindow(QMainWindow):
             self.btn_k_export = btn_export
             self.prog_quick = prog_bar
             self.in_edit_quick = in_edit
+            self.out_edit_quick = out_edit
             self.rb_k_preview = rb_preview
             self.rb_k_copy = rb_copy
             self.rb_k_move = rb_move
@@ -2201,7 +2269,7 @@ class MainWindow(QMainWindow):
                 match_q = (q in row_txt)
             match_grp = True
             if not is_all_grp:
-                grp_val = table.item(r, 8).text() if table.item(r, 8) else ''
+                grp_val = table.item(r, 9).text() if table.item(r, 9) else ''
                 match_grp = (grp in grp_val)
             table.setRowHidden(r, not (match_q and match_grp))
 
@@ -2226,6 +2294,7 @@ class MainWindow(QMainWindow):
     def start_worker(self, is_quant=True):
         if is_quant:
             target_dir = self.in_edit_quant.text().strip()
+            archive_root = self.out_edit_quant.text().strip() or os.path.join(APP_ROOT, "【归档完成】校准证书库")
             table = self.table_quant
             prog = self.prog_quant
             btn_start = self.btn_q_start
@@ -2238,6 +2307,7 @@ class MainWindow(QMainWindow):
             auto_unzip = self.cb_q_unzip.isChecked()
         else:
             target_dir = self.in_edit_quick.text().strip()
+            archive_root = self.out_edit_quick.text().strip() or os.path.join(APP_ROOT, "【归档完成】校准证书库")
             table = self.table_quick
             prog = self.prog_quick
             btn_start = self.btn_k_start
@@ -2250,10 +2320,8 @@ class MainWindow(QMainWindow):
             auto_unzip = self.cb_k_unzip.isChecked()
 
         if not target_dir or not os.path.exists(target_dir):
-            QMessageBox.warning(self, "路径错误", "待处理路径不存在，请先选择有效的文件夹！")
+            QMessageBox.warning(self, "路径错误", "待处理源目录不存在，请先选择有效的文件夹！")
             return
-
-        archive_root = os.path.join(APP_ROOT, "【归档完成】校准证书库")
 
         table.setRowCount(0)
         prog.setValue(0)
@@ -2263,10 +2331,17 @@ class MainWindow(QMainWindow):
         self.records_cache = []
         self.missing_cache = []
 
+        mode_name = {
+            'dry_run': '🔍 安全预览 (源文件原封不动，未作任何修改)',
+            'copy': '📑 复制归档 (规范重命名并复制至目标库，保留源文件)',
+            'move': '🚚 移动归档 (规范重命名并剪切至目标库)'
+        }.get(mode, mode.upper())
+
         self.append_log("INFO", "=" * 60)
-        self.append_log("INFO", f"🏁 任务启动：{'17025 定量校准' if is_quant else '快检驻点校准'}")
-        self.append_log("INFO", f"   扫描路径：{target_dir}")
-        self.append_log("INFO", f"   运行模式：{mode.upper()}")
+        self.append_log("INFO", f"🏁 任务启动：{'17025 定量校准工作台' if is_quant else '快检驻点校准工作台'}")
+        self.append_log("INFO", f"   待处理源目录：{target_dir}")
+        self.append_log("INFO", f"   归档目标总库：{archive_root}")
+        self.append_log("INFO", f"   当前运行模式：{mode_name}")
         self.append_log("INFO", "=" * 60)
 
         self.worker = ArchiveWorker(
@@ -2298,6 +2373,7 @@ class MainWindow(QMainWindow):
         
         items = [
             str(rec['序号']),
+            rec.get('处理状态', '🔍 [安全预览] 未改动'),
             rec['原始文件名'],
             rec['最终重命名'],
             rec['机构'],
@@ -2305,13 +2381,22 @@ class MainWindow(QMainWindow):
             rec['出厂编号'],
             rec['仪器名称'],
             rec['校准日期'],
-            rec['所属组别/实验室']
+            rec['所属组别/实验室'],
+            rec.get('目标归档位置', '')
         ]
         
         for c, text_val in enumerate(items):
             item = QTableWidgetItem(str(text_val))
-            item.setToolTip(str(text_val))
-            if c in (0, 3, 4, 7):
+            if c == 10:
+                item.setToolTip(f"完整目标路径:\n{rec.get('完整目标路径', '')}")
+            elif c == 2:
+                item.setToolTip(f"源文件位置:\n{rec.get('源文件路径', '')}")
+            elif c == 3:
+                item.setToolTip(f"规范建议文件名:\n{text_val}")
+            else:
+                item.setToolTip(str(text_val))
+                
+            if c in (0, 1, 4, 5, 8):
                 item.setTextAlignment(Qt.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
@@ -2326,6 +2411,9 @@ class MainWindow(QMainWindow):
         time_cost = summary.get('time_cost', 0)
         self.last_excel_path = summary.get('excel_path', '')
         self.missing_cache = missing
+        mode = summary.get('mode', 'dry_run')
+        target_dir = summary.get('target_dir', '')
+        archive_root = summary.get('archive_root', '')
 
         if is_quant:
             self.btn_q_start.setEnabled(True)
@@ -2363,20 +2451,33 @@ class MainWindow(QMainWindow):
 
         self.append_log("SUCCESS", f"🎉 处理完成！解析 {total} 份，计划比对待收回 {len(missing)} 台，耗时 {time_cost:.2f} 秒")
 
+        if mode == 'copy':
+            mode_desc = "📑 <b>【复制归档模式】</b>：证书已规范重命名并【复制】至归档目标库对应分类子文件夹，原始文件完好保留！"
+        elif mode == 'move':
+            mode_desc = "🚚 <b>【移动归档模式】</b>：证书已规范重命名并【剪切移动】至归档目标库对应分类子文件夹，源文件夹中不再保留！"
+        else:
+            mode_desc = "🔍 <b>【安全预览模式】</b>：源文件<b>原封不动</b>，未重命名或移动任何文件，仅生成分析比对结果与建议！"
+
         if total > 0:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("识别与核对完成")
             msg_box.setIcon(QMessageBox.Information)
             msg_box.setText(f"🎉 <b>校准证书识别与计划比对完成！</b><br><br>"
+                            f"⚙️ <b>执行状态：</b>{mode_desc}<br>"
+                            f"📂 <b>待处理源目录：</b>{target_dir}<br>"
+                            f"🏠 <b>归档目标总库：</b>{archive_root}<br><br>"
                             f"📊 <b>解析总数：</b>{total} 份 (耗时 {time_cost:.2f} 秒)<br>"
-                            f"🔍 <b>计划待收回：</b>{len(missing)} 台设备尚未扫描到 2026 证书<br><br>"
+                            f"🔍 <b>计划待收回：</b>{len(missing)} 台设备尚未扫描到 2026 证书<br>"
                             f"📋 <b>审计报表：</b>{os.path.basename(self.last_excel_path)}<br>")
+            btn_open_target = msg_box.addButton("📂 打开归档目标库", QMessageBox.ActionRole)
             btn_exp = msg_box.addButton("📊 查看汇总 Excel", QMessageBox.ActionRole)
             btn_audit = msg_box.addButton("🔍 查看待收回清单", QMessageBox.ActionRole)
             btn_ok = msg_box.addButton("确定", QMessageBox.AcceptRole)
             msg_box.exec_()
 
-            if msg_box.clickedButton() == btn_exp:
+            if msg_box.clickedButton() == btn_open_target:
+                self._open_dir(archive_root)
+            elif msg_box.clickedButton() == btn_exp:
                 self.open_excel_report()
             elif msg_box.clickedButton() == btn_audit:
                 self.btn_nav_audit.click()
@@ -2392,7 +2493,7 @@ class MainWindow(QMainWindow):
         if not item: return
         menu = QMenu(self)
         row = item.row()
-        new_name = table.item(row, 2).text()
+        new_name = table.item(row, 3).text() if table.item(row, 3) else ""
         
         act_copy = QAction(f"📋 复制规范文件名 ({new_name})", self)
         act_copy.triggered.connect(lambda: QApplication.clipboard().setText(new_name))
@@ -2401,10 +2502,27 @@ class MainWindow(QMainWindow):
         if row < len(self.records_cache):
             rec = self.records_cache[row]
             src_p = rec.get('源文件路径', '')
+            dst_p = rec.get('完整目标路径', '')
+            
             if src_p and os.path.exists(src_p):
-                act_locate = QAction("📂 在资源管理器中定位源文件", self)
-                act_locate.triggered.connect(lambda: os.system(f'explorer /select,"{src_p}"'))
-                menu.addAction(act_locate)
+                act_locate_src = QAction("📂 在资源管理器中定位【源文件】(当前位置)", self)
+                act_locate_src.triggered.connect(lambda: os.system(f'explorer /select,"{src_p}"'))
+                menu.addAction(act_locate_src)
+
+            if dst_p:
+                dst_dir = os.path.dirname(dst_p)
+                act_locate_dst = QAction(f"🎯 打开所在【归档目标目录】({os.path.basename(dst_dir)})", self)
+                act_locate_dst.triggered.connect(lambda: os.makedirs(dst_dir, exist_ok=True) or os.system(f'explorer "{dst_dir}"'))
+                menu.addAction(act_locate_dst)
+                
+                if os.path.exists(dst_p):
+                    act_locate_dst_file = QAction("🎯 在资源管理器中定位【归档后文件】", self)
+                    act_locate_dst_file.triggered.connect(lambda: os.system(f'explorer /select,"{dst_p}"'))
+                    menu.addAction(act_locate_dst_file)
+
+            act_copy_dst = QAction("📋 复制归档目标完整路径", self)
+            act_copy_dst.triggered.connect(lambda: QApplication.clipboard().setText(dst_p))
+            menu.addAction(act_copy_dst)
 
         menu.exec_(QCursor.pos())
 
@@ -2413,38 +2531,46 @@ class MainWindow(QMainWindow):
         row = item.row()
         if row < len(self.records_cache):
             rec = self.records_cache[row]
+            dst_p = rec.get('完整目标路径', '')
             src_p = rec.get('源文件路径', '')
-            if src_p and os.path.exists(src_p):
-                QDesktopServices.openUrl(QUrl.fromLocalFile(src_p))
+            target = dst_p if (dst_p and os.path.exists(dst_p)) else src_p
+            if target and os.path.exists(target):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(target))
 
     def apply_modern_stylesheet(self):
         self.setStyleSheet("""
             QWidget {
                 font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", sans-serif;
                 font-size: 13px;
-                color: #F4F4F5;
+                color: #0F172A;
             }
             QWidget#centralWidget {
-                background-color: #121316;
+                background-color: #F1F5F9;
+            }
+            QScrollArea, QScrollArea > QWidget > QWidget {
+                background-color: #F1F5F9;
+            }
+            #mainStackArea {
+                background-color: #F1F5F9;
             }
             #navSidebar {
-                background-color: #16171B;
-                border-right: 1px solid #27282D;
+                background-color: #0F172A;
+                border-right: 1px solid #1E293B;
             }
             #sidebarAppTitle {
-                color: #F4F4F5;
+                color: #FFFFFF;
                 font-size: 16px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
             }
             #sidebarAppSubtitle {
-                color: #9CA3AF;
+                color: #94A3B8;
                 font-size: 11px;
             }
             #navButton {
                 text-align: left;
                 padding-left: 14px;
-                color: #9CA3AF;
+                color: #CBD5E1;
                 font-size: 13px;
                 font-weight: 600;
                 background-color: transparent;
@@ -2452,17 +2578,17 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             #navButton:hover {
-                background-color: #22242B;
-                color: #F4F4F5;
+                background-color: #1E293B;
+                color: #FFFFFF;
             }
             #navButton:checked {
-                background-color: #3B82F6;
+                background-color: #0284C7;
                 color: #FFFFFF;
                 font-weight: bold;
             }
             #sidebarStatusCard {
-                background-color: #1A1B20;
-                border: 1px solid #282A33;
+                background-color: #1E293B;
+                border: 1px solid #334155;
                 border-radius: 8px;
             }
             #sidebarOcrLabel {
@@ -2475,93 +2601,106 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
             }
             #bannerCard {
-                background-color: #18191E;
-                border: 1px solid #2A2C34;
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
                 border-radius: 10px;
             }
             #bannerTitle {
-                color: #F4F4F5;
+                color: #0F172A;
                 font-size: 18px;
                 font-weight: bold;
             }
             #bannerSubtitle {
-                color: #9CA3AF;
+                color: #475569;
                 font-size: 12px;
             }
             #badgeType {
-                background-color: rgba(59, 130, 246, 0.18);
-                color: #60A5FA;
+                background-color: #E0F2FE;
+                color: #0369A1;
                 padding: 5px 14px;
                 border-radius: 6px;
                 font-size: 12px;
                 font-weight: bold;
-                border: 1px solid #3B82F6;
+                border: 1px solid #BAE6FD;
             }
             #modernCard {
-                background-color: #18191E;
-                border: 1px solid #282A33;
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
                 border-radius: 10px;
             }
             #cardTitle {
                 font-size: 14px;
                 font-weight: bold;
-                color: #F4F4F5;
+                color: #0F172A;
             }
             #formLabel {
                 font-weight: bold;
-                color: #D4D4D8;
+                color: #1E293B;
             }
             QLineEdit, QComboBox {
                 padding: 7px 12px;
-                border: 1px solid #32353E;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                background-color: #1A1B20;
-                color: #F4F4F5;
+                background-color: #FFFFFF;
+                color: #0F172A;
                 font-size: 13px;
-                selection-background-color: #3B82F6;
+                selection-background-color: #0284C7;
+                selection-color: #FFFFFF;
             }
             QLineEdit:focus, QComboBox:focus {
-                border: 2px solid #3B82F6;
-                background-color: #22242B;
+                border: 2px solid #0284C7;
+                background-color: #F8FAFC;
             }
             QComboBox QAbstractItemView {
-                background-color: #1E1F26;
-                color: #F4F4F5;
-                selection-background-color: #3B82F6;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                selection-background-color: #0284C7;
                 selection-color: #FFFFFF;
-                border: 1px solid #32353E;
+                border: 1px solid #CBD5E1;
             }
             QRadioButton, QCheckBox {
-                color: #E4E4E7;
+                color: #1E293B;
                 font-size: 13px;
+                font-weight: 500;
                 spacing: 6px;
             }
             QRadioButton::indicator, QCheckBox::indicator {
                 width: 16px;
                 height: 16px;
-                border: 1px solid #4B5563;
+                border: 1px solid #94A3B8;
                 border-radius: 3px;
-                background: #1A1B20;
+                background: #FFFFFF;
             }
             QRadioButton::indicator:checked, QCheckBox::indicator:checked {
-                background-color: #3B82F6;
-                border-color: #3B82F6;
+                background-color: #0284C7;
+                border-color: #0284C7;
+            }
+            QPushButton {
+                background-color: #0284C7;
+                color: #FFFFFF;
+                font-weight: 600;
+                border-radius: 6px;
+                padding: 7px 14px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #0369A1;
             }
             #btnOutline {
                 padding: 7px 16px;
-                border: 1px solid #383A44;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                background-color: #202228;
+                background-color: #FFFFFF;
                 font-weight: 600;
-                color: #E4E4E7;
+                color: #1E293B;
             }
             #btnOutline:hover {
-                background-color: #2A2C34;
-                border-color: #3B82F6;
-                color: #FFFFFF;
+                background-color: #F1F5F9;
+                border-color: #0284C7;
+                color: #0284C7;
             }
             #btnPrimary {
-                background-color: #3B82F6;
+                background-color: #0284C7;
                 color: #FFFFFF;
                 font-size: 14px;
                 font-weight: bold;
@@ -2569,17 +2708,17 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             #btnPrimary:hover {
-                background-color: #2563EB;
+                background-color: #0369A1;
             }
             #btnPrimary:pressed {
-                background-color: #1D4ED8;
+                background-color: #075985;
             }
             #btnPrimary:disabled {
-                background-color: #2A3548;
-                color: #64748B;
+                background-color: #94A3B8;
+                color: #F8FAFC;
             }
             #btnDanger {
-                background-color: #DC2626;
+                background-color: #EF4444;
                 color: #FFFFFF;
                 font-size: 13px;
                 font-weight: bold;
@@ -2587,126 +2726,149 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             #btnDanger:hover {
-                background-color: #B91C1C;
+                background-color: #DC2626;
             }
             #btnDanger:disabled {
-                background-color: #3D1C1C;
-                color: #64748B;
+                background-color: #FCA5A5;
+                color: #FFFFFF;
             }
             #btnAction {
-                background-color: #202228;
-                border: 1px solid #383A44;
+                background-color: #0F172A;
+                border: 1px solid #1E293B;
                 border-radius: 6px;
-                color: #E4E4E7;
+                color: #FFFFFF;
                 font-weight: 600;
                 font-size: 13px;
             }
             #btnAction:hover {
-                background-color: #2A2C34;
-                border-color: #3B82F6;
-                color: #FFFFFF;
+                background-color: #1E293B;
             }
             #btnAction:disabled {
-                background-color: #1A1B20;
-                border-color: #282A33;
-                color: #52525B;
+                background-color: #94A3B8;
+                border-color: #94A3B8;
+                color: #E2E8F0;
             }
             QProgressBar {
-                border: 1px solid #282A33;
+                border: 1px solid #CBD5E1;
                 border-radius: 4px;
                 text-align: center;
-                background-color: #1A1B20;
-                color: #F4F4F5;
+                background-color: #E2E8F0;
+                color: #0F172A;
                 font-weight: bold;
             }
             QProgressBar::chunk {
-                background-color: #3B82F6;
+                background-color: #0284C7;
                 border-radius: 3px;
             }
             QTableWidget {
-                border: 1px solid #282A33;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                background-color: #16171B;
-                gridline-color: #26282E;
-                color: #F4F4F5;
+                background-color: #FFFFFF;
+                alternate-background-color: #F8FAFC;
+                gridline-color: #E2E8F0;
+                color: #0F172A;
                 font-size: 12px;
-                selection-background-color: #2563EB;
+                selection-background-color: #0284C7;
                 selection-color: #FFFFFF;
             }
             QHeaderView::section {
-                background-color: #202228;
-                color: #E4E4E7;
+                background-color: #F1F5F9;
+                color: #0F172A;
                 padding: 8px;
                 font-weight: bold;
                 border: none;
-                border-bottom: 2px solid #3B82F6;
+                border-bottom: 2px solid #0284C7;
             }
             #modernLogView {
-                border: 1px solid #26282E;
+                border: 1px solid #CBD5E1;
                 border-radius: 8px;
-                background-color: #0E0F12;
-                color: #F4F4F5;
+                background-color: #0F172A;
+                color: #F8FAFC;
                 font-family: "Consolas", "Courier New", monospace;
                 font-size: 12px;
                 line-height: 1.5;
                 padding: 12px;
             }
             QScrollBar:vertical {
-                background-color: #16171B;
+                background-color: #F1F5F9;
                 width: 10px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background-color: #32353E;
+                background-color: #CBD5E1;
                 min-height: 20px;
                 border-radius: 5px;
             }
             QScrollBar::handle:vertical:hover {
-                background-color: #4B5563;
+                background-color: #94A3B8;
             }
             QScrollBar:horizontal {
-                background-color: #16171B;
+                background-color: #F1F5F9;
                 height: 10px;
                 margin: 0px;
             }
             QScrollBar::handle:horizontal {
-                background-color: #32353E;
+                background-color: #CBD5E1;
                 min-width: 20px;
                 border-radius: 5px;
             }
             QScrollBar::handle:horizontal:hover {
-                background-color: #4B5563;
+                background-color: #94A3B8;
             }
-            QScrollBar::add-line, QScrollBar::sub-line {
+            QScrollBar:add-line, QScrollBar::sub-line {
                 width: 0px;
                 height: 0px;
             }
             QListWidget {
-                background-color: #1A1B20;
-                border: 1px solid #2E3038;
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                color: #F4F4F5;
+                color: #0F172A;
             }
             QListWidget::item {
                 padding: 8px;
-                border-bottom: 1px solid #26282E;
+                border-bottom: 1px solid #F1F5F9;
+                color: #0F172A;
             }
             QListWidget::item:selected {
-                background-color: #2563EB;
-                color: #FFFFFF;
+                background-color: #E0F2FE;
+                color: #0369A1;
+                font-weight: bold;
             }
             QMessageBox, QDialog {
-                background-color: #1A1B20;
-                color: #F4F4F5;
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QMessageBox QLabel, QDialog QLabel {
+                color: #0F172A;
+                font-size: 13px;
+            }
+            QMessageBox QPushButton, QDialog QPushButton {
+                background-color: #0284C7;
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 8px 18px;
+                border: none;
+                min-width: 85px;
+            }
+            QMessageBox QPushButton:hover, QDialog QPushButton:hover {
+                background-color: #0369A1;
             }
             QMenu {
-                background-color: #1E1F26;
-                color: #F4F4F5;
-                border: 1px solid #32353E;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                color: #0F172A;
             }
             QMenu::item:selected {
-                background-color: #2563EB;
-                color: #FFFFFF;
+                background-color: #E0F2FE;
+                color: #0284C7;
+                font-weight: bold;
             }
         """)
 

@@ -45,7 +45,7 @@ try:
     status = subprocess.run(['git', '-C', temp_dir, 'status', '--porcelain'], capture_output=True, text=True)
     
     if status.stdout.strip():
-        subprocess.run(['git', '-C', temp_dir, 'commit', '-m', 'feat(v2.1): Antigravity dark UI, color-blind accessibility, DN 100% station mapping, Dafeng date fix'], check=True)
+        subprocess.run(['git', '-C', temp_dir, 'commit', '-m', 'feat(v2.2): Corporate Business Light theme for color-blind accessibility, eliminate white-on-white text, expose target archive directory and 11-column table'], check=True)
         subprocess.run(['git', '-C', temp_dir, 'push', 'origin', 'main'], check=True)
         print('✅ 成功推送到 GitHub 远程仓库！')
     else:

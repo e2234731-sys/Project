@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FQT 实验室校准证书智能归档与量值溯源工作台 V2.2
+FQT 实验室校准证书智能归档与量值溯源工作台 V2.3
 ======================================================================
 1. 【现代化双轨工作台架构】
    - 🏢 17025定量实验室设备校准工作台
@@ -68,64 +68,43 @@ def setup_dll_directories():
         app_dir = os.path.dirname(os.path.abspath(__file__))
         search_dirs.append(app_dir)
 
-    for p in search_dirs:
-        if os.path.exists(p):
+    for d in search_dirs:
+        if os.path.isdir(d):
             try:
-                os.add_dll_directory(p)
+                os.add_dll_directory(d)
             except Exception:
                 pass
-
-    if search_dirs:
-        os.environ['PATH'] = ';'.join([d for d in search_dirs if os.path.exists(d)]) + ';' + os.environ.get('PATH', '')
-
-    if hasattr(sys, '_MEIPASS'):
-        capi_dir = os.path.join(sys._MEIPASS, 'onnxruntime', 'capi')
-        if os.path.exists(capi_dir):
-            for dll_name in ['onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_pybind11_state.pyd']:
-                fp = os.path.join(capi_dir, dll_name)
-                if os.path.exists(fp):
-                    try:
-                        ctypes.windll.kernel32.LoadLibraryExW(fp, 0, 8)
-                    except Exception:
-                        pass
+            if d not in os.environ.get('PATH', ''):
+                os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
 
 setup_dll_directories()
 
-warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
-
-import pandas as pd
-
-# 稳健导入 PyMuPDF / fitz
+# ── 3. 动态环境检测与 RapidOCR 初始化
 try:
     import fitz
-    try:
-        fitz.TOOLS.mupdf_display_errors(False)
-    except Exception:
-        pass
-except Exception:
-    try:
-        import pymupdf as fitz
-        try:
-            fitz.TOOLS.mupdf_display_errors(False)
-        except Exception:
-            pass
-    except Exception:
-        fitz = None
+except ImportError:
+    fitz = None
 
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+try:
+    import pandas as pd
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+except ImportError:
+    pass
 
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGridLayout, QLabel, QLineEdit, QPushButton, QCheckBox,
-    QRadioButton, QButtonGroup, QProgressBar, QTextEdit, QTableWidget,
-    QTableWidgetItem, QHeaderView, QTabWidget, QGroupBox, QFileDialog,
-    QMessageBox, QFrame, QDialog, QListWidget, QListWidgetItem,
-    QInputDialog, QMenu, QAction, QSizePolicy, QScrollArea, QStackedWidget,
-    QComboBox, QSplitter
-)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QUrl
-from PyQt5.QtGui import QFont, QColor, QIcon, QCursor, QDesktopServices
+try:
+    from PyQt5.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QGridLayout, QLabel, QLineEdit, QPushButton, QProgressBar,
+        QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
+        QComboBox, QCheckBox, QFrame, QSplitter, QTabWidget,
+        QTextEdit, QHeaderView, QRadioButton, QButtonGroup, QScrollArea,
+        QStackedWidget, QMenu, QAction
+    )
+    from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QUrl
+    from PyQt5.QtGui import QFont, QColor, QIcon, QCursor, QDesktopServices
+except ImportError:
+    pass
 
 # ── 定位真实运行根目录 (支持独立可执行文件与源码运行环境)
 def get_app_dir():
@@ -141,10 +120,11 @@ UI_SETTINGS_FILE = os.path.join(APP_ROOT, "ui_settings.json")
 def init_rapidocr():
     try:
         import rapidocr_onnxruntime
-        import rapidocr_onnxruntime.ch_ppocr_v2_cls as _cls_mod
-        import rapidocr_onnxruntime.ch_ppocr_v3_det as _det_mod
-        import rapidocr_onnxruntime.ch_ppocr_v3_rec as _rec_mod
-        from rapidocr_onnxruntime.rapid_ocr_api import RapidOCR
+        from rapidocr_onnxruntime import RapidOCR
+
+        _det_mod = importlib.import_module('rapidocr_onnxruntime.ch_ppocr_v3_det')
+        _cls_mod = importlib.import_module('rapidocr_onnxruntime.ch_ppocr_v2_cls')
+        _rec_mod = importlib.import_module('rapidocr_onnxruntime.ch_ppocr_v3_rec')
 
         def _safe_init_module(module_name, class_name):
             if 'det' in module_name.lower():
@@ -193,7 +173,7 @@ def init_rapidocr():
 
 ocr_engine, HAS_OCR = init_rapidocr()
 
-VERSION = "V2.2"
+VERSION = "V2.3"
 APP_NAME = "FQT 实验室校准证书智能归档与管理工作台"
 
 STANDARD_GROUPS = [
@@ -1520,9 +1500,23 @@ class ArchiveWorker(QThread):
             device_type = fields.get('device_type', '未知')
 
             new_filename = f"{build_new_filename(issuer, fields)}.pdf"
-            target_dir_path = build_archive_dir(self.archive_root, issuer, fields)
 
-            if self.mode != 'dry_run':
+            if self.mode == 'rename':
+                target_dir_path = os.path.dirname(pdf_path)
+                try:
+                    rel_archive_path = os.path.relpath(target_dir_path, self.target_dir).replace('\\', '/') if self.target_dir else '原目录'
+                except ValueError:
+                    rel_archive_path = '原目录'
+                if rel_archive_path == '.':
+                    rel_archive_path = '源目录'
+            else:
+                target_dir_path = build_archive_dir(self.archive_root, issuer, fields)
+                try:
+                    rel_archive_path = os.path.relpath(target_dir_path, self.archive_root).replace('\\', '/')
+                except ValueError:
+                    rel_archive_path = target_dir_path.replace('\\', '/')
+
+            if self.mode in ('copy', 'move'):
                 os.makedirs(target_dir_path, exist_ok=True)
 
             target_file_path = os.path.join(target_dir_path, new_filename)
@@ -1534,15 +1528,47 @@ class ArchiveWorker(QThread):
                 target_file_path = os.path.join(target_dir_path, new_filename)
                 conflict_suffix += 1
 
-            if self.mode == 'copy':
-                action_txt = "📑 [已复制] 归档完成"
+            if self.mode == 'rename':
+                if os.path.abspath(target_file_path) != os.path.abspath(pdf_path):
+                    try:
+                        shutil.move(pdf_path, target_file_path)
+                        action_txt = "🏷️ [已重命名] 成功"
+                        self.log_signal.emit("SUCCESS", f"🏷️ [{filename}] 成功重命名为 -> {new_filename}")
+                    except Exception as e:
+                        action_txt = f"❌ [重命名失败] {e}"
+                        self.log_signal.emit("ERROR", f"❌ 重命名失败 [{filename}]: {e}")
+                else:
+                    action_txt = "🏷️ [无需改动] 已规范命名"
+                    self.log_signal.emit("INFO", f"🏷️ [{filename}] 已是规范命名，无需修改")
+            elif self.mode == 'copy':
+                if os.path.abspath(target_file_path) != os.path.abspath(pdf_path):
+                    try:
+                        shutil.copy2(pdf_path, target_file_path)
+                        action_txt = "📑 [已复制] 归档完成"
+                        self.log_signal.emit("SUCCESS", f"📑 [{filename}] 已复制归档 -> {os.path.basename(target_dir_path)}/{new_filename}")
+                    except Exception as e:
+                        action_txt = f"❌ [复制失败] {e}"
+                        self.log_signal.emit("ERROR", f"❌ 复制归档失败 [{filename}]: {e}")
+                else:
+                    action_txt = "📑 [跳过复制] 目标即源文件"
             elif self.mode == 'move':
-                action_txt = "🚚 [已移动] 归档完成"
+                if os.path.abspath(target_file_path) != os.path.abspath(pdf_path):
+                    try:
+                        shutil.move(pdf_path, target_file_path)
+                        action_txt = "🚚 [已移动] 归档完成"
+                        self.log_signal.emit("SUCCESS", f"🚚 [{filename}] 已剪切归档 -> {os.path.basename(target_dir_path)}/{new_filename}")
+                    except Exception as e:
+                        action_txt = f"❌ [移动失败] {e}"
+                        self.log_signal.emit("ERROR", f"❌ 剪切归档失败 [{filename}]: {e}")
+                else:
+                    action_txt = "🚚 [跳过移动] 目标即源文件"
             else:
                 action_txt = "🔍 [安全预览] 未改动"
 
-            success_count += 1
-            rel_archive_path = os.path.relpath(target_dir_path, self.archive_root).replace('\\', '/') if self.mode != 'dry_run' else target_dir_path.replace('\\', '/')
+            if action_txt.startswith("❌"):
+                error_count += 1
+            else:
+                success_count += 1
             
             code_val = fields.get('asset_no') if fields.get('asset_no') != '未知编号' else fields.get('serial_no', '—')
             if code_val and code_val != '—':
@@ -1686,7 +1712,7 @@ class MainWindow(QMainWindow):
         logo_box.setSpacing(4)
         app_title = QLabel("FQT 质量工作台")
         app_title.setObjectName("sidebarAppTitle")
-        app_subtitle = QLabel(f"校准管理与自动归档 {VERSION} · 实验室专业版")
+        app_subtitle = QLabel(f"校准管理与自动归档 {VERSION}")
         app_subtitle.setObjectName("sidebarAppSubtitle")
         logo_box.addWidget(app_title)
         logo_box.addWidget(app_subtitle)
@@ -1912,19 +1938,22 @@ class MainWindow(QMainWindow):
 
         # 运行模式与功能勾选
         mode_row = QHBoxLayout()
-        mode_row.setSpacing(18)
+        mode_row.setSpacing(14)
         
-        rb_preview = QRadioButton("🔍 仅智能识别与结果返回 (安全预览/不改动源文件)")
+        rb_preview = QRadioButton("🔍 安全预览 (仅比对/不改文件)")
         rb_preview.setChecked(True)
-        rb_copy = QRadioButton("📑 复制并归档至目标库 (保留源文件)")
-        rb_move = QRadioButton("🚚 移动并归档至目标库 (源文件移至目标库)")
+        rb_rename = QRadioButton("🏷️ 原目录就地规范重命名")
+        rb_copy = QRadioButton("📑 复制归档至目标库")
+        rb_move = QRadioButton("🚚 移动归档至目标库")
         
         btn_grp = QButtonGroup(self)
         btn_grp.addButton(rb_preview)
+        btn_grp.addButton(rb_rename)
         btn_grp.addButton(rb_copy)
         btn_grp.addButton(rb_move)
 
         mode_row.addWidget(rb_preview)
+        mode_row.addWidget(rb_rename)
         mode_row.addWidget(rb_copy)
         mode_row.addWidget(rb_move)
         mode_row.addStretch()
@@ -1940,26 +1969,32 @@ class MainWindow(QMainWindow):
         pc_layout.addLayout(mode_row)
 
         # 动态模式高亮提示卡片 (消除“文件到底改去哪里了”的混淆)
-        mode_hint = QLabel("💡 当前模式：【安全预览模式】—— 系统仅深度解析并生成比对审计报表，源文件原封不动，未重命名或移动任何文件！")
+        mode_hint = QLabel("💡 当前模式：【安全预览模式】—— 系统仅深度解析并生成比对审计报表，源文件原封不动，未重命名或移动任何物理文件！")
         mode_hint.setWordWrap(True)
         mode_hint.setStyleSheet("background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
         pc_layout.addWidget(mode_hint)
 
         def update_mode_hint():
             dest_p = out_edit.text().strip() or os.path.join(APP_ROOT, "【归档完成】校准证书库")
+            src_p = in_edit.text().strip() or "待指定源目录"
             if rb_preview.isChecked():
-                mode_hint.setText("💡 当前模式：【安全预览模式】—— 系统仅深度解析并生成比对审计报表，源文件原封不动，未重命名或移动任何文件！")
+                mode_hint.setText("💡 当前模式：【安全预览模式】—— 系统仅深度解析并生成比对审计报表，源文件原封不动，未重命名或移动任何物理文件！")
                 mode_hint.setStyleSheet("background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
+            elif rb_rename.isChecked():
+                mode_hint.setText(f"🏷️ 当前模式：【原目录就地重命名】—— 证书将在其当前源目录内【就地规范重命名】，不改变文件夹层级，文件仍在源目录！\n   操作目录：{src_p}")
+                mode_hint.setStyleSheet("background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
             elif rb_copy.isChecked():
-                mode_hint.setText(f"📑 当前模式：【复制归档模式】—— 证书将按规范重命名并【复制】至归档目标库对应分类子文件夹，原始文件完好保留！\n   归档目标根目录：{dest_p}")
+                mode_hint.setText(f"📑 当前模式：【复制归档模式】—— 证书将按规范重命名并【复制】至归档目标库对应分类子文件夹，原始文件完好保留！\n   归档目标总库：{dest_p}")
                 mode_hint.setStyleSheet("background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
             elif rb_move.isChecked():
-                mode_hint.setText(f"🚚 当前模式：【移动归档模式】—— 证书将按规范重命名并【剪切移动】至归档目标库对应分类子文件夹，源文件夹中不再保留！\n   归档目标根目录：{dest_p}")
+                mode_hint.setText(f"🚚 当前模式：【移动归档模式】—— 证书将按规范重命名并【剪切移动】至归档目标库对应分类子文件夹，源文件夹中不再保留！\n   归档目标总库：{dest_p}")
                 mode_hint.setStyleSheet("background-color: #FEF3C7; color: #B45309; border: 1px solid #FDE68A; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
 
         rb_preview.toggled.connect(update_mode_hint)
+        rb_rename.toggled.connect(update_mode_hint)
         rb_copy.toggled.connect(update_mode_hint)
         rb_move.toggled.connect(update_mode_hint)
+        in_edit.textChanged.connect(update_mode_hint)
         out_edit.textChanged.connect(update_mode_hint)
 
         # 核心按钮栏
@@ -2062,6 +2097,7 @@ class MainWindow(QMainWindow):
             self.in_edit_quant = in_edit
             self.out_edit_quant = out_edit
             self.rb_q_preview = rb_preview
+            self.rb_q_rename = rb_rename
             self.rb_q_copy = rb_copy
             self.rb_q_move = rb_move
             self.cb_q_ocr = cb_ocr
@@ -2077,6 +2113,7 @@ class MainWindow(QMainWindow):
             self.in_edit_quick = in_edit
             self.out_edit_quick = out_edit
             self.rb_k_preview = rb_preview
+            self.rb_k_rename = rb_rename
             self.rb_k_copy = rb_copy
             self.rb_k_move = rb_move
             self.cb_k_ocr = cb_ocr
@@ -2301,7 +2338,8 @@ class MainWindow(QMainWindow):
             btn_stop = self.btn_q_stop
             btn_exp = self.btn_q_export
             mode = 'dry_run'
-            if self.rb_q_copy.isChecked(): mode = 'copy'
+            if self.rb_q_rename.isChecked(): mode = 'rename'
+            elif self.rb_q_copy.isChecked(): mode = 'copy'
             elif self.rb_q_move.isChecked(): mode = 'move'
             enable_ocr = self.cb_q_ocr.isChecked()
             auto_unzip = self.cb_q_unzip.isChecked()
@@ -2314,7 +2352,8 @@ class MainWindow(QMainWindow):
             btn_stop = self.btn_k_stop
             btn_exp = self.btn_k_export
             mode = 'dry_run'
-            if self.rb_k_copy.isChecked(): mode = 'copy'
+            if self.rb_k_rename.isChecked(): mode = 'rename'
+            elif self.rb_k_copy.isChecked(): mode = 'copy'
             elif self.rb_k_move.isChecked(): mode = 'move'
             enable_ocr = self.cb_k_ocr.isChecked()
             auto_unzip = self.cb_k_unzip.isChecked()
@@ -2333,6 +2372,7 @@ class MainWindow(QMainWindow):
 
         mode_name = {
             'dry_run': '🔍 安全预览 (源文件原封不动，未作任何修改)',
+            'rename': '🏷️ 原目录直接规范重命名 (源文件原路径就地重命名)',
             'copy': '📑 复制归档 (规范重命名并复制至目标库，保留源文件)',
             'move': '🚚 移动归档 (规范重命名并剪切至目标库)'
         }.get(mode, mode.upper())
@@ -2451,31 +2491,53 @@ class MainWindow(QMainWindow):
 
         self.append_log("SUCCESS", f"🎉 处理完成！解析 {total} 份，计划比对待收回 {len(missing)} 台，耗时 {time_cost:.2f} 秒")
 
-        if mode == 'copy':
+        if mode == 'rename':
+            mode_desc = "🏷️ <b>【原目录就地重命名模式】</b>：证书已在其当前原目录内【就地重命名】为标准规范文件名！"
+        elif mode == 'copy':
             mode_desc = "📑 <b>【复制归档模式】</b>：证书已规范重命名并【复制】至归档目标库对应分类子文件夹，原始文件完好保留！"
         elif mode == 'move':
             mode_desc = "🚚 <b>【移动归档模式】</b>：证书已规范重命名并【剪切移动】至归档目标库对应分类子文件夹，源文件夹中不再保留！"
         else:
-            mode_desc = "🔍 <b>【安全预览模式】</b>：源文件<b>原封不动</b>，未重命名或移动任何文件，仅生成分析比对结果与建议！"
+            mode_desc = "<span style='color:#DC2626; font-weight:bold;'>🔍【安全预览模式】（注意：源文件原封不动，未改动或移动任何物理文件！）</span>"
 
         if total > 0:
             msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("识别与核对完成")
-            msg_box.setIcon(QMessageBox.Information)
-            msg_box.setText(f"🎉 <b>校准证书识别与计划比对完成！</b><br><br>"
-                            f"⚙️ <b>执行状态：</b>{mode_desc}<br>"
+            msg_box.setWindowTitle("识别与归档处理完成")
+            msg_box.setIcon(QMessageBox.Information if mode != 'dry_run' else QMessageBox.Warning)
+
+            notice_banner = ""
+            if mode == 'dry_run':
+                notice_banner = ("<div style='background-color:#FEF2F2; color:#991B1B; border:1px solid #FECACA; padding:8px 12px; border-radius:6px; margin-bottom:10px;'>"
+                                 "⚠️ <b>温馨提示：</b>您当前运行的是【安全预览模式】，系统仅执行了识别与台账比对，<b>并未改动或移动任何物理文件</b>！<br>"
+                                 "若需重命名或移动归档，请在运行模式中切换为【原目录就地规范重命名】、【复制归档至目标库】或【移动归档至目标库】后再次点击运行。</div>")
+            elif mode == 'rename':
+                notice_banner = ("<div style='background-color:#F0FDF4; color:#166534; border:1px solid #BBF7D0; padding:8px 12px; border-radius:6px; margin-bottom:10px;'>"
+                                 "✅ <b>重命名完成：</b>所有扫描到的校准证书已在原目录就地完成规范重命名！</div>")
+            else:
+                notice_banner = ("<div style='background-color:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; padding:8px 12px; border-radius:6px; margin-bottom:10px;'>"
+                                 "✅ <b>归档完成：</b>所有扫描到的校准证书已成功按组别/实验室归档至目标总库！</div>")
+
+            dest_display = archive_root if mode in ('copy', 'move') else '原目录就地存放'
+            msg_box.setText(f"{notice_banner}"
+                            f"🎉 <b>校准证书处理与计划比对完毕！</b><br><br>"
+                            f"⚙️ <b>执行模式：</b>{mode_desc}<br>"
                             f"📂 <b>待处理源目录：</b>{target_dir}<br>"
-                            f"🏠 <b>归档目标总库：</b>{archive_root}<br><br>"
+                            f"🏠 <b>归档目标存放：</b>{dest_display}<br><br>"
                             f"📊 <b>解析总数：</b>{total} 份 (耗时 {time_cost:.2f} 秒)<br>"
                             f"🔍 <b>计划待收回：</b>{len(missing)} 台设备尚未扫描到 2026 证书<br>"
                             f"📋 <b>审计报表：</b>{os.path.basename(self.last_excel_path)}<br>")
-            btn_open_target = msg_box.addButton("📂 打开归档目标库", QMessageBox.ActionRole)
+            btn_open_src = msg_box.addButton("📂 打开源文件目录", QMessageBox.ActionRole)
+            btn_open_target = None
+            if mode in ('copy', 'move'):
+                btn_open_target = msg_box.addButton("🏠 打开归档目标库", QMessageBox.ActionRole)
             btn_exp = msg_box.addButton("📊 查看汇总 Excel", QMessageBox.ActionRole)
             btn_audit = msg_box.addButton("🔍 查看待收回清单", QMessageBox.ActionRole)
             btn_ok = msg_box.addButton("确定", QMessageBox.AcceptRole)
             msg_box.exec_()
 
-            if msg_box.clickedButton() == btn_open_target:
+            if msg_box.clickedButton() == btn_open_src:
+                self._open_dir(target_dir)
+            elif btn_open_target and msg_box.clickedButton() == btn_open_target:
                 self._open_dir(archive_root)
             elif msg_box.clickedButton() == btn_exp:
                 self.open_excel_report()

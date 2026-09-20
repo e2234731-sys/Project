@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FQT 实验室校准证书智能归档与量值溯源工作台 V2.3
+FQT 实验室校准证书智能归档与量值溯源工作台 V2.4
 ======================================================================
 1. 【现代化双轨工作台架构】
    - 🏢 17025定量实验室设备校准工作台
@@ -99,7 +99,8 @@ try:
         QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
         QComboBox, QCheckBox, QFrame, QSplitter, QTabWidget,
         QTextEdit, QHeaderView, QRadioButton, QButtonGroup, QScrollArea,
-        QStackedWidget, QMenu, QAction
+        QStackedWidget, QMenu, QAction, QListWidget, QListWidgetItem,
+        QInputDialog, QDialog, QAbstractItemView, QScrollBar
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QUrl
     from PyQt5.QtGui import QFont, QColor, QIcon, QCursor, QDesktopServices
@@ -173,7 +174,7 @@ def init_rapidocr():
 
 ocr_engine, HAS_OCR = init_rapidocr()
 
-VERSION = "V2.3"
+VERSION = "V2.4"
 APP_NAME = "FQT 实验室校准证书智能归档与管理工作台"
 
 STANDARD_GROUPS = [

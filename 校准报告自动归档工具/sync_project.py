@@ -45,7 +45,7 @@ try:
     status = subprocess.run(['git', '-C', temp_dir, 'status', '--porcelain'], capture_output=True, text=True)
     
     if status.stdout.strip():
-        subprocess.run(['git', '-C', temp_dir, 'commit', '-m', 'fix(v2.4): add missing PyQt5 QtWidgets imports (QListWidget, QInputDialog, etc.) for settings page'], check=True)
+        subprocess.run(['git', '-C', temp_dir, 'commit', '-m', 'feat(v2.5): add organize-by-group directory creation and two-way ledger synchronization'], check=True)
         subprocess.run(['git', '-C', temp_dir, 'push', 'origin', 'main'], check=True)
         print('✅ 成功推送到 GitHub 远程仓库！')
     else:

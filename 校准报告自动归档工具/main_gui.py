@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FQT 实验室校准证书智能归档与量值溯源工作台 V2.4
+FQT 实验室校准证书智能归档与量值溯源工作台 V2.5
 ======================================================================
 1. 【现代化双轨工作台架构】
    - 🏢 17025定量实验室设备校准工作台
@@ -174,7 +174,7 @@ def init_rapidocr():
 
 ocr_engine, HAS_OCR = init_rapidocr()
 
-VERSION = "V2.4"
+VERSION = "V2.5"
 APP_NAME = "FQT 实验室校准证书智能归档与管理工作台"
 
 STANDARD_GROUPS = [
@@ -303,6 +303,43 @@ def parse_yyyymm(date8):
         return f"{y}年", f"{mm}月", f"{m}月"
     return '未知年份', '未知月份', '未知月份'
 
+def parse_date_obj(date_str):
+    if not date_str or str(date_str) in {'未知校准', '未知日期', '—', 'nan', 'None', '', '/'}:
+        return None
+    if isinstance(date_str, (datetime.date, datetime.datetime)):
+        return date_str.date() if isinstance(date_str, datetime.datetime) else date_str
+    s = str(date_str).strip()
+    s = re.sub(r'[\s/年月日._-]+', '-', s).strip('-')
+    parts = s.split('-')
+    if len(parts) == 3:
+        try:
+            y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+            if y < 100: y += 2000
+            return datetime.date(y, m, d)
+        except Exception:
+            pass
+    elif len(s) == 8 and s.isdigit():
+        try:
+            return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+        except Exception:
+            pass
+    return None
+
+def add_years_minus_one_day(d, years=1):
+    try:
+        y_int = int(float(years))
+    except Exception:
+        y_int = 1
+    try:
+        target_year = d.year + y_int
+        if d.month == 2 and d.day == 29:
+            new_date = datetime.date(target_year, 2, 28)
+        else:
+            new_date = datetime.date(target_year, d.month, d.day)
+        return new_date - datetime.timedelta(days=1)
+    except Exception:
+        return d
+
 def is_text_garbled_or_image(text, min_chinese=4):
     if not text or len(text.strip()) < 20:
         return True
@@ -331,6 +368,34 @@ class LedgerDatabase:
         self.all_known_assets = set()
         self.sorted_asset_list = []
         self.loaded_sources = []
+
+    def find_ledger_path(self, is_quant=True):
+        if is_quant:
+            keywords = ['年度计划汇总', '量值溯源总表', '2026年年度计划汇总']
+        else:
+            keywords = ['各实验室仪器设备校准清单', '仪器设备校准清单', '校准清单']
+            
+        for p in self.loaded_sources:
+            base = os.path.basename(p)
+            if any(kw in base for kw in keywords):
+                return p
+        if self.loaded_sources:
+            return self.loaded_sources[0]
+            
+        search_dirs = [
+            APP_ROOT,
+            r"D:\工作\01.实验室法定资质与17025体系\1.定量实验室17025体系维护\2.设备管理\1.设备检定校准\1.历年设备检定校准证书",
+            r"D:\工作\01.实验室法定资质与17025体系\1.定量实验室17025体系维护\2.设备管理\1.设备检定校准",
+            r"D:\工作\03.快检质量网络与驻点管理\8.快检工作\7.快检设备检定校准"
+        ]
+        candidates = ['2026年年度计划汇总.xlsx', '2026年各实验室仪器设备校准清单.xlsx'] if is_quant else ['2026年各实验室仪器设备校准清单.xlsx', '2026年年度计划汇总.xlsx']
+        for d in search_dirs:
+            if os.path.exists(d):
+                for c in candidates:
+                    fp = os.path.join(d, c)
+                    if os.path.exists(fp):
+                        return fp
+        return ""
 
     def load(self, base_dir=APP_ROOT, log_callback=None):
         def log(msg):
@@ -434,6 +499,9 @@ class LedgerDatabase:
                     lab_col = next((c for c in df_sheet.columns if '实验室' in c or '项目' in c), None)
                     inst_col = next((c for c in df_sheet.columns if '设备名称' in c or '仪器名称' in c), None)
                     model_col = next((c for c in df_sheet.columns if '型号' in c or '规格' in c), None)
+                    date_col = next((c for c in df_sheet.columns if ('上次' in c and ('校准' in c or '检定' in c))), None)
+                    cycle_col = next((c for c in df_sheet.columns if '周期' in c), None)
+                    due_col = next((c for c in df_sheet.columns if ('计划送检' in c or '拟送校' in c)), None)
 
                     if no_col:
                         for _, r in df_sheet.iterrows():
@@ -441,13 +509,24 @@ class LedgerDatabase:
                             lab = str(r[lab_col]).strip() if lab_col and pd.notna(r[lab_col]) else ''
                             inst = str(r[inst_col]).strip() if inst_col and pd.notna(r[inst_col]) else ''
                             model = str(r[model_col]).strip() if model_col and pd.notna(r[model_col]) else ''
+                            date_v = str(r[date_col]).strip() if date_col and pd.notna(r[date_col]) else ''
+                            cycle_v = 1
+                            if cycle_col and pd.notna(r[cycle_col]):
+                                try: cycle_v = float(r[cycle_col])
+                                except Exception: cycle_v = 1
+                            due_v = str(r[due_col]).strip() if due_col and pd.notna(r[due_col]) else ''
+
                             if code and code not in {'nan', 'None', '', '/', '—', '无'}:
                                 self.quick_check_map[code] = {
                                     'code': code,
                                     'lab': lab or '未知实验室',
                                     'inst': inst or '未查找到',
                                     'model': model if model not in {'nan', 'None'} else '',
-                                    'type': '快检'
+                                    'type': '快检',
+                                    'last_cal_date': date_v,
+                                    'cycle': cycle_v,
+                                    'due_date': due_v,
+                                    'source_file': fpath
                                 }
         except Exception as e:
             log(f"⚠️ 加载快检台账异常: {e}")
@@ -473,6 +552,9 @@ class LedgerDatabase:
                     model_col = next((c for c in df_sheet.columns if re.search(r'规格型号|型号规格|型号|规格', c)), None)
                     sn_col = next((c for c in df_sheet.columns if re.search(r'出厂编号|序列号|SN', c)), None)
                     extra_grp_col = next((c for c in df_sheet.columns if any(g in str(df_sheet[c].values) for g in STANDARD_GROUPS) and c != grp_col), None)
+                    date_col = next((c for c in df_sheet.columns if re.search(r'上次.*(校准|检定)日期', c)), None)
+                    cycle_col = next((c for c in df_sheet.columns if re.search(r'周期', c)), None)
+                    due_col = next((c for c in df_sheet.columns if re.search(r'拟送校|计划送检', c)), None)
 
                     if no_col:
                         for _, r in df_sheet.iterrows():
@@ -486,6 +568,12 @@ class LedgerDatabase:
                             inst = str(r[inst_col]).strip() if inst_col and pd.notna(r[inst_col]) else ''
                             model = str(r[model_col]).strip() if model_col and pd.notna(r[model_col]) else ''
                             sn = str(r[sn_col]).strip() if sn_col and pd.notna(r[sn_col]) else ''
+                            date_v = str(r[date_col]).strip() if date_col and pd.notna(r[date_col]) else ''
+                            cycle_v = 1
+                            if cycle_col and pd.notna(r[cycle_col]):
+                                try: cycle_v = float(r[cycle_col])
+                                except Exception: cycle_v = 1
+                            due_v = str(r[due_col]).strip() if due_col and pd.notna(r[due_col]) else ''
 
                             invalid = {'nan', 'None', '', '/', '—', '无'}
                             if code and code not in invalid:
@@ -499,7 +587,11 @@ class LedgerDatabase:
                                         'inst': inst_val,
                                         'model': model if model not in invalid else '',
                                         'serial_no': sn if sn not in invalid else '',
-                                        'type': '定量'
+                                        'type': '定量',
+                                        'last_cal_date': date_v,
+                                        'cycle': cycle_v,
+                                        'due_date': due_v,
+                                        'source_file': fpath
                                     }
                                 if sn and sn not in invalid and len(sn) >= 3:
                                     self.serial_to_asset[sn] = code
@@ -1183,12 +1275,31 @@ def build_new_filename(issuer, fields):
     return '_'.join([sanitize_filename(p) for p in parts])
 
 
-def build_archive_dir(archive_root, issuer, fields):
+def build_archive_dir(archive_root, issuer, fields, source_dir=None, is_organize_in_source=False):
+    """
+    构建按校准年月与组别分类的规范归档目录（完美对齐生产规范）：
+    1. 源目录就地分类整理：{source_dir}/{批次或年月}{机构}校准证书-{组别}/
+       例如：2026年7-9月达丰校准证书-理化微生物组、2026年7-9月达丰校准证书-气相组
+    2. 归档总库模式：{archive_root}/{YYYY}年检定校准证书/{YYYY}年{M}月{机构}校准证书-{组别}/
+    3. 快检设备：{archive_root}/快检设备/{YYYY}年{M}月{项目组}设备校准证书/
+    """
     device_type = fields.get('device_type', '未知')
     cal_date = fields.get('cal_date', '')
     year_tag, mm_tag, m_tag = parse_yyyymm(cal_date)
     issuer_name = ISSUER_SHORT_NAME.get(issuer, '第三方')
+    group = sanitize_filename(fields.get('group', '未知组别'))
 
+    # 1. 源目录就地按年月与组别分类建立文件夹
+    if is_organize_in_source and source_dir:
+        src_base = os.path.basename(os.path.abspath(source_dir))
+        clean_batch = re.sub(r'\d+份$', '', src_base).strip()
+        if any(kw in clean_batch for kw in ['校准', '检定', '202', '月']):
+            folder_name = f"{clean_batch}-{group}"
+        else:
+            folder_name = f"{year_tag}{m_tag}{issuer_name}校准证书-{group}"
+        return os.path.join(source_dir, folder_name)
+
+    # 2. 归档至目标总库模式
     if device_type == '快检':
         lab_name = sanitize_filename(fields.get('lab_name', '未知实验室'))
         if not lab_name.endswith('项目组') and not lab_name.endswith('街道') and not lab_name.endswith('组'):
@@ -1196,17 +1307,31 @@ def build_archive_dir(archive_root, issuer, fields):
         else:
             folder_tag = lab_name
         month_folder = f"{year_tag}{m_tag}{folder_tag}设备校准证书"
+        if os.path.basename(os.path.abspath(archive_root)) in ('快检设备', '快检'):
+            return os.path.join(archive_root, month_folder)
         return os.path.join(archive_root, '快检设备', month_folder)
 
     elif device_type == '定量':
-        group = sanitize_filename(fields.get('group', '未知组别'))
-        year_folder = f"{year_tag}检定校准证书"
-        month_issuer_folder = f"{year_tag}{m_tag}{issuer_name}校准证书"
-        detail_folder = f"{year_tag}{m_tag}{group}校准证书-{issuer_name}"
-        return os.path.join(archive_root, year_folder, month_issuer_folder, detail_folder)
+        abs_root = os.path.abspath(archive_root)
+        root_base = os.path.basename(abs_root)
+
+        # 若目标库本身已是月份/季度/批次文件夹（例如用户直接选了 2026年7-9月达丰校准证书）
+        if any(kw in root_base for kw in ['校准证书', '检定']):
+            if re.search(r'\d+月|\d+-\d+月', root_base):
+                clean_root_base = re.sub(r'\d+份$', '', root_base).strip()
+                folder_name = f"{clean_root_base}-{group}"
+                return os.path.join(archive_root, folder_name)
+            else:
+                # 目标库为形如 2026年检定校准证书
+                folder_name = f"{year_tag}{m_tag}{issuer_name}校准证书-{group}"
+                return os.path.join(archive_root, folder_name)
+        else:
+            # 目标库为通用总库，例如 【归档完成】校准证书库
+            folder_name = f"{year_tag}{m_tag}{issuer_name}校准证书-{group}"
+            return os.path.join(archive_root, f"{year_tag}检定校准证书", folder_name)
 
     else:
-        return os.path.join(archive_root, '未分类设备', f"{year_tag}{m_tag}校准证书")
+        return os.path.join(archive_root, '未分类设备', f"{year_tag}{m_tag}校准证书-{group}")
 
 
 def safe_extract_zip(zip_path, target_extract_dir):
@@ -1307,6 +1432,158 @@ def export_styled_excel(df_records, df_missing, output_excel_path):
             ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
     wb.save(output_excel_path)
+
+
+def sync_ledger_with_records(ledger_path, records, is_quant=True, log_callback=None):
+    """
+    根据最新扫描识别出的校准记录，双向更新《量值溯源总表》/《各实验室仪器设备校准清单》：
+    1. 自动创建时间戳安全备份文件 (.bak.xlsx)，绝不破坏原始数据；
+    2. 使用 openpyxl (data_only=False) 读取，完整保留原表中包含的 EDATE、LET 等所有动态计算公式；
+    3. 将真实校准日期写入【上次校准/检定日期】，若【拟送校时间】非公式则自动推算顺延，若为公式则交由 Excel 原生重算；
+    4. 自动在【备注】栏中追加规范的溯源标签 [2026已校准(机构:日期)]；
+    5. 全表联动：同步更新总表及对应的第一、二、三季度子表；
+    6. 返回详细更新统计及明细清单。
+    """
+    def log(level, msg):
+        if log_callback:
+            log_callback(level, msg)
+
+    if not os.path.exists(ledger_path):
+        return {'status': 'error', 'msg': f'台账文件不存在: {ledger_path}'}
+
+    valid_records = []
+    for r in records:
+        code = str(r.get('设备编号') or '').strip().upper()
+        cal_date_obj = parse_date_obj(r.get('校准日期'))
+        if code and code not in {'未知编号', '—', 'NAN', 'NONE', '无', '待定'} and cal_date_obj:
+            valid_records.append({
+                'code': code,
+                'cal_date_obj': cal_date_obj,
+                'cal_date_str': cal_date_obj.strftime('%Y-%m-%d'),
+                'issuer': r.get('机构', '第三方'),
+                'inst': r.get('仪器名称', '')
+            })
+
+    if not valid_records:
+        return {'status': 'error', 'msg': '未找到包含有效设备编号与校准日期的记录'}
+
+    # 1. 安全自动备份 (带时间戳)
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    dir_name = os.path.dirname(os.path.abspath(ledger_path))
+    base_name = os.path.splitext(os.path.basename(ledger_path))[0]
+    ext = os.path.splitext(ledger_path)[1]
+    backup_path = os.path.join(dir_name, f"{base_name}_备份_{timestamp}{ext}")
+    try:
+        shutil.copy2(ledger_path, backup_path)
+        log("INFO", f"💾 已创建安全备份: {os.path.basename(backup_path)}")
+    except Exception as e:
+        return {'status': 'error', 'msg': f'创建安全备份失败: {e}'}
+
+    # 2. 读取并更新 Excel (data_only=False 确保完整保留所有原表格公式)
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(ledger_path, data_only=False)
+    except Exception as e:
+        return {'status': 'error', 'msg': f'无法打开 Excel 工作簿: {e}'}
+
+    # 聚合去重，同编号取最新校准日期
+    record_map = {}
+    for vr in valid_records:
+        c = vr['code']
+        if c not in record_map or vr['cal_date_obj'] > record_map[c]['cal_date_obj']:
+            record_map[c] = vr
+
+    updated_log = []
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        if ws.max_row < 2:
+            continue
+
+        header_row = None
+        code_col, date_col, cycle_col, due_col, note_col, exec_col = None, None, None, None, None, None
+        for r_h in [1, 2, 3]:
+            for c in range(1, min(ws.max_column + 1, 35)):
+                val = str(ws.cell(r_h, c).value or '').strip()
+                clean = re.sub(r'[\s\r\n/]+', '', val)
+                if not code_col and any(clean == kw for kw in ['设备编号', '器具编号', '管理号', '资产编号']):
+                    code_col = c
+                elif not date_col and ('上次' in clean and ('校准' in clean or '检定' in clean)):
+                    date_col = c
+                elif not cycle_col and '周期' in clean:
+                    cycle_col = c
+                elif not due_col and ('计划送检' in clean or '拟送校' in clean or '计划检定' in clean):
+                    due_col = c
+                elif not note_col and ('备注' in clean or '修正' in clean):
+                    note_col = c
+                elif not exec_col and '执行日期' in clean:
+                    exec_col = c
+            if code_col and date_col:
+                header_row = r_h
+                break
+
+        if not code_col or not date_col:
+            continue
+
+        for row in range(header_row + 1, ws.max_row + 1):
+            cell_code = str(ws.cell(row, code_col).value or '').strip().upper()
+            if cell_code in record_map:
+                rec = record_map[cell_code]
+                new_date = rec['cal_date_obj']
+                old_date_val = ws.cell(row, date_col).value
+
+                # 1. 更新上次校准/检定日期
+                ws.cell(row, date_col).value = datetime.datetime(new_date.year, new_date.month, new_date.day)
+
+                # 2. 计算周期与下一次拟送校时间
+                cycle_val = 1
+                if cycle_col:
+                    try:
+                        c_val = ws.cell(row, cycle_col).value
+                        if c_val and str(c_val).strip() not in {'/', '-'}:
+                            cycle_val = float(c_val)
+                    except Exception:
+                        cycle_val = 1
+
+                next_due_date = add_years_minus_one_day(new_date, cycle_val)
+
+                if due_col:
+                    due_val = ws.cell(row, due_col).value
+                    # 若原有单元格是动态公式（如 EDATE），则保留公式让 Excel 动态计算
+                    if not (due_val and str(due_val).startswith('=')):
+                        ws.cell(row, due_col).value = datetime.datetime(next_due_date.year, next_due_date.month, next_due_date.day)
+
+                # 3. 备注栏追加更新标识
+                if note_col:
+                    cur_note = str(ws.cell(row, note_col).value or '').strip()
+                    sync_tag = f"2026已校准({rec['issuer']}:{rec['cal_date_str']})"
+                    if sync_tag not in cur_note:
+                        if cur_note in {'', '/', 'None', 'nan'}:
+                            ws.cell(row, note_col).value = sync_tag
+                        else:
+                            ws.cell(row, note_col).value = f"{cur_note}; {sync_tag}"
+
+                # 4. 执行日期（若非公式）
+                if exec_col:
+                    ex_val = ws.cell(row, exec_col).value
+                    if not (ex_val and str(ex_val).startswith('=')):
+                        ws.cell(row, exec_col).value = datetime.datetime(new_date.year, new_date.month, new_date.day)
+
+                updated_log.append((sheet_name, cell_code, str(old_date_val)[:10] if old_date_val else '—', rec['cal_date_str'], next_due_date.strftime('%Y-%m-%d')))
+
+    try:
+        wb.save(ledger_path)
+        log("SUCCESS", f"💾 台账保存成功: {os.path.basename(ledger_path)}，已同步更新 {len(updated_log)} 处记录")
+    except Exception as e:
+        return {'status': 'error', 'msg': f'保存台账文件失败(可能文件正被 Excel 占用，请先关闭): {e}'}
+
+    return {
+        'status': 'success',
+        'backup_path': backup_path,
+        'ledger_path': ledger_path,
+        'updated_count': len(updated_log),
+        'updated_items': updated_log
+    }
 
 
 # ============================================================
@@ -1510,14 +1787,20 @@ class ArchiveWorker(QThread):
                     rel_archive_path = '原目录'
                 if rel_archive_path == '.':
                     rel_archive_path = '源目录'
+            elif self.mode == 'organize':
+                target_dir_path = build_archive_dir(self.archive_root, issuer, fields, source_dir=self.target_dir, is_organize_in_source=True)
+                try:
+                    rel_archive_path = os.path.relpath(target_dir_path, self.target_dir).replace('\\', '/')
+                except ValueError:
+                    rel_archive_path = os.path.basename(target_dir_path)
             else:
-                target_dir_path = build_archive_dir(self.archive_root, issuer, fields)
+                target_dir_path = build_archive_dir(self.archive_root, issuer, fields, source_dir=self.target_dir, is_organize_in_source=False)
                 try:
                     rel_archive_path = os.path.relpath(target_dir_path, self.archive_root).replace('\\', '/')
                 except ValueError:
                     rel_archive_path = target_dir_path.replace('\\', '/')
 
-            if self.mode in ('copy', 'move'):
+            if self.mode in ('copy', 'move', 'organize'):
                 os.makedirs(target_dir_path, exist_ok=True)
 
             target_file_path = os.path.join(target_dir_path, new_filename)
@@ -1541,6 +1824,17 @@ class ArchiveWorker(QThread):
                 else:
                     action_txt = "🏷️ [无需改动] 已规范命名"
                     self.log_signal.emit("INFO", f"🏷️ [{filename}] 已是规范命名，无需修改")
+            elif self.mode == 'organize':
+                if os.path.abspath(target_file_path) != os.path.abspath(pdf_path):
+                    try:
+                        shutil.move(pdf_path, target_file_path)
+                        action_txt = "📁 [已归入组别] 完成"
+                        self.log_signal.emit("SUCCESS", f"📁 [{filename}] 已归入组别 -> {os.path.basename(target_dir_path)}/{new_filename}")
+                    except Exception as e:
+                        action_txt = f"❌ [归类失败] {e}"
+                        self.log_signal.emit("ERROR", f"❌ 组别归类失败 [{filename}]: {e}")
+                else:
+                    action_txt = "📁 [已在组别目录] 无需移动"
             elif self.mode == 'copy':
                 if os.path.abspath(target_file_path) != os.path.abspath(pdf_path):
                     try:
@@ -1666,7 +1960,8 @@ class ArchiveWorker(QThread):
             'error_count': error_count,
             'mode': self.mode,
             'target_dir': self.target_dir,
-            'archive_root': self.archive_root
+            'archive_root': self.archive_root,
+            'ledger': ledger
         })
 
 
@@ -1687,6 +1982,9 @@ class MainWindow(QMainWindow):
         self.presets = load_presets()
         self.records_cache = []
         self.missing_cache = []
+        self.ledger_db = LedgerDatabase()
+        self.current_ledger_path = ""
+        self.last_is_quant = True
 
         self.init_ui()
         self.apply_modern_stylesheet()
@@ -1944,17 +2242,20 @@ class MainWindow(QMainWindow):
         rb_preview = QRadioButton("🔍 安全预览 (仅比对/不改文件)")
         rb_preview.setChecked(True)
         rb_rename = QRadioButton("🏷️ 原目录就地规范重命名")
+        rb_organize = QRadioButton("📁 原目录按组别归类建文件夹")
         rb_copy = QRadioButton("📑 复制归档至目标库")
         rb_move = QRadioButton("🚚 移动归档至目标库")
         
         btn_grp = QButtonGroup(self)
         btn_grp.addButton(rb_preview)
         btn_grp.addButton(rb_rename)
+        btn_grp.addButton(rb_organize)
         btn_grp.addButton(rb_copy)
         btn_grp.addButton(rb_move)
 
         mode_row.addWidget(rb_preview)
         mode_row.addWidget(rb_rename)
+        mode_row.addWidget(rb_organize)
         mode_row.addWidget(rb_copy)
         mode_row.addWidget(rb_move)
         mode_row.addStretch()
@@ -1984,6 +2285,9 @@ class MainWindow(QMainWindow):
             elif rb_rename.isChecked():
                 mode_hint.setText(f"🏷️ 当前模式：【原目录就地重命名】—— 证书将在其当前源目录内【就地规范重命名】，不改变文件夹层级，文件仍在源目录！\n   操作目录：{src_p}")
                 mode_hint.setStyleSheet("background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
+            elif rb_organize.isChecked():
+                mode_hint.setText(f"📁 当前模式：【原目录按组别归类建文件夹】—— 系统将在源目录下自动创建【{os.path.basename(src_p)}-各组别】分类文件夹，并将规范重命名后的证书就地移动归档！\n   操作源目录：{src_p}")
+                mode_hint.setStyleSheet("background-color: #F0FDF4; color: #166534; border: 1px solid #86EFAC; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
             elif rb_copy.isChecked():
                 mode_hint.setText(f"📑 当前模式：【复制归档模式】—— 证书将按规范重命名并【复制】至归档目标库对应分类子文件夹，原始文件完好保留！\n   归档目标总库：{dest_p}")
                 mode_hint.setStyleSheet("background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px;")
@@ -1993,6 +2297,7 @@ class MainWindow(QMainWindow):
 
         rb_preview.toggled.connect(update_mode_hint)
         rb_rename.toggled.connect(update_mode_hint)
+        rb_organize.toggled.connect(update_mode_hint)
         rb_copy.toggled.connect(update_mode_hint)
         rb_move.toggled.connect(update_mode_hint)
         in_edit.textChanged.connect(update_mode_hint)
@@ -2099,6 +2404,7 @@ class MainWindow(QMainWindow):
             self.out_edit_quant = out_edit
             self.rb_q_preview = rb_preview
             self.rb_q_rename = rb_rename
+            self.rb_q_organize = rb_organize
             self.rb_q_copy = rb_copy
             self.rb_q_move = rb_move
             self.cb_q_ocr = cb_ocr
@@ -2115,6 +2421,7 @@ class MainWindow(QMainWindow):
             self.out_edit_quick = out_edit
             self.rb_k_preview = rb_preview
             self.rb_k_rename = rb_rename
+            self.rb_k_organize = rb_organize
             self.rb_k_copy = rb_copy
             self.rb_k_move = rb_move
             self.cb_k_ocr = cb_ocr
@@ -2139,6 +2446,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
+        # 1. 顶部现代化横幅卡片
         header = QFrame()
         header.setObjectName("bannerCard")
         h_box = QHBoxLayout(header)
@@ -2146,14 +2454,27 @@ class MainWindow(QMainWindow):
 
         v_title = QVBoxLayout()
         v_title.setSpacing(4)
-        t_lbl = QLabel("📊 计划台账闭环核对与量值溯源审计")
+        t_lbl = QLabel("📊 计划台账闭环核对与量值溯源双向维护")
         t_lbl.setObjectName("bannerTitle")
-        d_lbl = QLabel("对比年度校准计划 vs. 实际识别证书 · 精准定位待送检、漏检及未收回证书清单")
+        d_lbl = QLabel("对比年度校准计划 vs. 实际识别证书 · 支持一键双向回填更新量值溯源总表与下一次拟送校时间")
         d_lbl.setObjectName("bannerSubtitle")
         v_title.addWidget(t_lbl)
         v_title.addWidget(d_lbl)
         h_box.addLayout(v_title)
         h_box.addStretch()
+
+        self.btn_sync_ledger = QPushButton("🔄 一键双向回填更新量值溯源总表")
+        self.btn_sync_ledger.setObjectName("btnSuccess")
+        self.btn_sync_ledger.setFixedHeight(38)
+        self.btn_sync_ledger.setToolTip("将本次扫描识别的最新校准日期双向回填更新至量值溯源总表，按周期自动推算下一次拟送校时间，并自动创建安全备份")
+        self.btn_sync_ledger.clicked.connect(self.on_sync_ledger_clicked)
+        h_box.addWidget(self.btn_sync_ledger)
+
+        btn_open_ledger = QPushButton("📂 打开台账所在目录")
+        btn_open_ledger.setObjectName("btnOutline")
+        btn_open_ledger.setFixedHeight(38)
+        btn_open_ledger.clicked.connect(self.on_open_ledger_dir_clicked)
+        h_box.addWidget(btn_open_ledger)
 
         btn_exp_audit = QPushButton("📊 导出审计明细 Excel")
         btn_exp_audit.setObjectName("btnAction")
@@ -2162,16 +2483,84 @@ class MainWindow(QMainWindow):
         h_box.addWidget(btn_exp_audit)
         layout.addWidget(header)
 
-        # 缺漏表格卡片
-        audit_card = QFrame()
-        audit_card.setObjectName("modernCard")
-        ac_layout = QVBoxLayout(audit_card)
-        ac_layout.setContentsMargins(16, 16, 16, 16)
-        ac_layout.setSpacing(10)
+        # 2. 当前联动台账状态与文件切换控制卡片
+        ctrl_card = QFrame()
+        ctrl_card.setObjectName("modernCard")
+        cc_layout = QHBoxLayout(ctrl_card)
+        cc_layout.setContentsMargins(16, 12, 16, 12)
+        cc_layout.setSpacing(10)
 
-        card_title = QLabel("⚠️ 计划内待收回 / 未见 2026 校准证书设备清单")
+        lbl_lead = QLabel("📌 <b>联动台账文件：</b>")
+        lbl_lead.setStyleSheet("color: #0F172A; font-size: 13px;")
+        cc_layout.addWidget(lbl_lead)
+
+        self.lbl_active_ledger = QLabel(self.current_ledger_path or "自动检索载入中...")
+        self.lbl_active_ledger.setStyleSheet("color: #0284C7; font-weight: bold; font-size: 13px;")
+        self.lbl_active_ledger.setWordWrap(True)
+        cc_layout.addWidget(self.lbl_active_ledger, stretch=1)
+
+        btn_change_ledger = QPushButton("📂 更改/重选台账...")
+        btn_change_ledger.setObjectName("btnOutline")
+        btn_change_ledger.setFixedHeight(32)
+        btn_change_ledger.clicked.connect(self.on_change_ledger_clicked)
+        cc_layout.addWidget(btn_change_ledger)
+
+        self.lbl_trace_summary = QLabel("📊 本次待回填: 0 台 | 计划待收回: 0 台")
+        self.lbl_trace_summary.setStyleSheet("background-color: #EFF6FF; color: #1E40AF; padding: 5px 12px; border-radius: 6px; font-weight: 600; font-size: 12px; border: 1px solid #BFDBFE;")
+        cc_layout.addWidget(self.lbl_trace_summary)
+
+        layout.addWidget(ctrl_card)
+
+        # 3. 标签页容器 (量值溯源回填清单 vs. 计划待收回清单)
+        tab_widget = QTabWidget()
+        tab_widget.setObjectName("auditTabs")
+
+        # ── Tab 1: 量值溯源双向联动与回填预览
+        tab_trace = QWidget()
+        tt_layout = QVBoxLayout(tab_trace)
+        tt_layout.setContentsMargins(14, 14, 14, 14)
+        tt_layout.setSpacing(10)
+
+        hint_trace = QLabel("💡 <b>量值溯源双向联动说明：</b>下表汇总展示本次扫描识别的所有有效证书。点击上方【🔄 一键双向回填更新量值溯源总表】，系统将自动更新【上次校准日期】、按周期推算【下一次拟送校时间】并在备注栏打标，执行前自动创建时间戳安全备份。双击行可直接打开对应证书 PDF。")
+        hint_trace.setWordWrap(True)
+        hint_trace.setStyleSheet("color: #475569; font-size: 12px; line-height: 1.4;")
+        tt_layout.addWidget(hint_trace)
+
+        self.table_traceability = QTableWidget(0, 11)
+        self.table_traceability.setHorizontalHeaderLabels([
+            "序号", "溯源联动状态", "设备编号", "仪器名称", "出厂编号",
+            "所属组别/驻点", "实际校准日期", "原台账上次校准日", "推算下次拟送校时间",
+            "校准机构", "源证书文件"
+        ])
+        self.table_traceability.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table_traceability.horizontalHeader().resizeSection(0, 45)
+        self.table_traceability.horizontalHeader().resizeSection(1, 140)
+        self.table_traceability.horizontalHeader().resizeSection(2, 95)
+        self.table_traceability.horizontalHeader().resizeSection(3, 160)
+        self.table_traceability.horizontalHeader().resizeSection(4, 110)
+        self.table_traceability.horizontalHeader().resizeSection(5, 120)
+        self.table_traceability.horizontalHeader().resizeSection(6, 100)
+        self.table_traceability.horizontalHeader().resizeSection(7, 120)
+        self.table_traceability.horizontalHeader().resizeSection(8, 140)
+        self.table_traceability.horizontalHeader().resizeSection(9, 85)
+        self.table_traceability.horizontalHeader().resizeSection(10, 220)
+        self.table_traceability.setAlternatingRowColors(True)
+        self.table_traceability.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_traceability.customContextMenuRequested.connect(lambda pos: self.show_table_menu(pos, self.table_traceability))
+        self.table_traceability.itemDoubleClicked.connect(self.on_trace_double_clicked)
+        tt_layout.addWidget(self.table_traceability)
+
+        tab_widget.addTab(tab_trace, "🔄 量值溯源双向联动与回填清单")
+
+        # ── Tab 2: 计划内待收回/未见证书设备清单
+        tab_missing = QWidget()
+        tm_layout = QVBoxLayout(tab_missing)
+        tm_layout.setContentsMargins(14, 14, 14, 14)
+        tm_layout.setSpacing(10)
+
+        card_title = QLabel("⚠️ 计划内待收回 / 未见 2026 校准证书设备清单 (台账已规划但未扫描到证书)")
         card_title.setObjectName("cardTitle")
-        ac_layout.addWidget(card_title)
+        tm_layout.addWidget(card_title)
 
         self.table_audit = QTableWidget(0, 7)
         self.table_audit.setHorizontalHeaderLabels([
@@ -2186,11 +2575,141 @@ class MainWindow(QMainWindow):
         self.table_audit.horizontalHeader().resizeSection(5, 100)
         self.table_audit.horizontalHeader().resizeSection(6, 260)
         self.table_audit.setAlternatingRowColors(True)
-        ac_layout.addWidget(self.table_audit)
+        self.table_audit.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_audit.customContextMenuRequested.connect(lambda pos: self.show_table_menu(pos, self.table_audit))
+        self.table_audit.itemDoubleClicked.connect(self.on_table_double_clicked)
+        tm_layout.addWidget(self.table_audit)
 
-        layout.addWidget(audit_card)
+        tab_widget.addTab(tab_missing, "⚠️ 计划待收回 / 缺漏设备清单")
+
+        layout.addWidget(tab_widget)
         scroll.setWidget(page_widget)
         return scroll
+
+    def on_trace_double_clicked(self, item):
+        row = item.row()
+        c_code = self.table_traceability.item(row, 2)
+        code_txt = c_code.text().strip() if c_code else ""
+        for r in self.records_cache:
+            if r.get('设备编号') == code_txt:
+                src_p = r.get('源文件路径', '')
+                if src_p and os.path.exists(src_p):
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(src_p)))
+                    return
+        if row < len(self.records_cache):
+            src_p = self.records_cache[row].get('源文件路径', '')
+            if src_p and os.path.exists(src_p):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(src_p)))
+
+    def on_open_ledger_dir_clicked(self):
+        ledger_path = self.current_ledger_path or self.ledger_db.find_ledger_path(self.last_is_quant)
+        if ledger_path and os.path.exists(ledger_path):
+            self._open_dir(os.path.dirname(os.path.abspath(ledger_path)))
+        else:
+            QMessageBox.warning(self, "提示", "尚未定位到有效的量值溯源总表文件所在目录。")
+
+    def on_change_ledger_clicked(self):
+        fpath, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择量值溯源总表或计划清单 Excel",
+            os.path.dirname(self.current_ledger_path) if self.current_ledger_path else APP_ROOT,
+            "Excel Files (*.xlsx *.xls)"
+        )
+        if fpath:
+            self.current_ledger_path = fpath
+            self.lbl_active_ledger.setText(fpath)
+            self.append_log("INFO", f"📌 已指定量值溯源总表为: {fpath}")
+
+    def on_sync_ledger_clicked(self):
+        if not self.records_cache:
+            QMessageBox.warning(self, "暂无数据", "当前没有扫描识别的证书记录，请先在工作台运行【🚀 一键智能识别与核对】！")
+            return
+            
+        ledger_path = self.current_ledger_path
+        if not ledger_path or not os.path.exists(ledger_path):
+            ledger_path = self.ledger_db.find_ledger_path(self.last_is_quant)
+            if not ledger_path or not os.path.exists(ledger_path):
+                fpath, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "请选择要回填更新的量值溯源总表 Excel",
+                    APP_ROOT,
+                    "Excel Files (*.xlsx *.xls)"
+                )
+                if not fpath:
+                    return
+                ledger_path = fpath
+                self.current_ledger_path = fpath
+                self.lbl_active_ledger.setText(fpath)
+
+        valid_records = [
+            r for r in self.records_cache 
+            if r.get('设备编号') not in {'未知编号', '—', '', None} and parse_date_obj(r.get('校准日期'))
+        ]
+        
+        if not valid_records:
+            QMessageBox.warning(self, "无可回填记录", "本次识别结果中未包含有效的【设备编号】与【校准日期】，无法执行台账回填。")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认双向回填更新量值溯源总表",
+            f"<b>确认将本次识别的 {len(valid_records)} 台设备校准信息双向更新至量值溯源总表吗？</b><br><br>"
+            f"📁 <b>目标总表文件：</b>{os.path.basename(ledger_path)}<br>"
+            f"📍 <b>完整路径：</b>{ledger_path}<br><br>"
+            f"🔒 <b>安全保障机制：</b><br>"
+            f"  1. 系统将在原文件同级目录下自动生成带时间戳的 <b>.bak 备份文件</b>；<br>"
+            f"  2. 自动更新【上次校准/检定日期】，并通过周期公式自动重算【拟送校时间】；<br>"
+            f"  3. 严格保护并保留原始 Excel 中所有单元格公式、图表及边框样式。<br>",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.append_log("INFO", f"🔄 开始执行量值溯源总表双向回填更新: {ledger_path}")
+        res = sync_ledger_with_records(
+            ledger_path=ledger_path,
+            records=valid_records,
+            is_quant=self.last_is_quant,
+            log_callback=lambda level, msg: self.append_log(level, msg)
+        )
+
+        if res.get('status') == 'success':
+            updated_count = res.get('updated_count', 0)
+            backup_path = res.get('backup_path', '')
+            
+            # 更新界面表格状态为“✅ 已成功回填”
+            updated_codes = {item[1].upper() for item in res.get('updated_items', [])}
+            for r in range(self.table_traceability.rowCount()):
+                c_item = self.table_traceability.item(r, 2)
+                if c_item and c_item.text().strip().upper() in updated_codes:
+                    status_item = QTableWidgetItem("✅ 已成功回填更新")
+                    status_item.setForeground(QColor("#15803D"))
+                    self.table_traceability.setItem(r, 1, status_item)
+
+            self.append_log("SUCCESS", f"🎉 量值溯源总表双向更新完成！共更新 {updated_count} 处设备记录，备份位于: {backup_path}")
+            
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("量值溯源双向更新完成")
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setText(
+                f"🎉 <b>量值溯源总表双向更新成功！</b><br><br>"
+                f"📊 <b>成功更新设备记录：</b>{updated_count} 处<br>"
+                f"📁 <b>更新目标表：</b>{os.path.basename(ledger_path)}<br>"
+                f"💾 <b>安全备份文件：</b>{os.path.basename(backup_path)}<br><br>"
+                f"系统已自动更新【上次校准日期】、重算【下一次拟送校时间】并在备注栏打上溯源标签！"
+            )
+            btn_open_wb = msg_box.addButton("📊 查看更新后的 Excel", QMessageBox.ActionRole)
+            btn_open_dir = msg_box.addButton("📂 打开所在目录", QMessageBox.ActionRole)
+            btn_close = msg_box.addButton("完成", QMessageBox.AcceptRole)
+            msg_box.exec_()
+
+            if msg_box.clickedButton() == btn_open_wb:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(ledger_path)))
+            elif msg_box.clickedButton() == btn_open_dir:
+                self._open_dir(os.path.dirname(os.path.abspath(ledger_path)))
+        else:
+            QMessageBox.critical(self, "回填失败", f"量值溯源总表回填失败: {res.get('msg', '未知异常')}")
 
     def _create_log_page(self):
         page_widget = QWidget()
@@ -2340,6 +2859,7 @@ class MainWindow(QMainWindow):
             btn_exp = self.btn_q_export
             mode = 'dry_run'
             if self.rb_q_rename.isChecked(): mode = 'rename'
+            elif self.rb_q_organize.isChecked(): mode = 'organize'
             elif self.rb_q_copy.isChecked(): mode = 'copy'
             elif self.rb_q_move.isChecked(): mode = 'move'
             enable_ocr = self.cb_q_ocr.isChecked()
@@ -2354,6 +2874,7 @@ class MainWindow(QMainWindow):
             btn_exp = self.btn_k_export
             mode = 'dry_run'
             if self.rb_k_rename.isChecked(): mode = 'rename'
+            elif self.rb_k_organize.isChecked(): mode = 'organize'
             elif self.rb_k_copy.isChecked(): mode = 'copy'
             elif self.rb_k_move.isChecked(): mode = 'move'
             enable_ocr = self.cb_k_ocr.isChecked()
@@ -2374,6 +2895,7 @@ class MainWindow(QMainWindow):
         mode_name = {
             'dry_run': '🔍 安全预览 (源文件原封不动，未作任何修改)',
             'rename': '🏷️ 原目录直接规范重命名 (源文件原路径就地重命名)',
+            'organize': '📁 原目录按组别归类 (源目录下就地创建 批次-组别 文件夹并规范归档)',
             'copy': '📑 复制归档 (规范重命名并复制至目标库，保留源文件)',
             'move': '🚚 移动归档 (规范重命名并剪切至目标库)'
         }.get(mode, mode.upper())
@@ -2451,10 +2973,21 @@ class MainWindow(QMainWindow):
         total = len(records)
         time_cost = summary.get('time_cost', 0)
         self.last_excel_path = summary.get('excel_path', '')
+        self.records_cache = records
         self.missing_cache = missing
+        self.last_is_quant = is_quant
         mode = summary.get('mode', 'dry_run')
         target_dir = summary.get('target_dir', '')
         archive_root = summary.get('archive_root', '')
+
+        if 'ledger' in summary and summary['ledger']:
+            self.ledger_db = summary['ledger']
+
+        detected_path = self.ledger_db.find_ledger_path(is_quant)
+        if detected_path:
+            self.current_ledger_path = detected_path
+            if hasattr(self, 'lbl_active_ledger'):
+                self.lbl_active_ledger.setText(detected_path)
 
         if is_quant:
             self.btn_q_start.setEnabled(True)
@@ -2477,7 +3010,7 @@ class MainWindow(QMainWindow):
             self.lbl_k_groups.setText(f"{len(unique_labs)} 站")
             self.lbl_k_time.setText(f"{time_cost:.2f} 秒")
 
-        # 填充审计表格
+        # 1. 填充计划待收回/缺漏审计表格
         self.table_audit.setRowCount(0)
         for idx, m in enumerate(missing, 1):
             r = self.table_audit.rowCount()
@@ -2490,10 +3023,77 @@ class MainWindow(QMainWindow):
             self.table_audit.setItem(r, 5, QTableWidgetItem(m['设备类型']))
             self.table_audit.setItem(r, 6, QTableWidgetItem(m['溯源状态']))
 
-        self.append_log("SUCCESS", f"🎉 处理完成！解析 {total} 份，计划比对待收回 {len(missing)} 台，耗时 {time_cost:.2f} 秒")
+        # 2. 填充量值溯源双向联动与回填预览表格
+        self.table_traceability.setRowCount(0)
+        valid_trace_count = 0
+        for idx, r in enumerate(records, 1):
+            row_idx = self.table_traceability.rowCount()
+            self.table_traceability.insertRow(row_idx)
+            
+            code = r.get('设备编号', '—')
+            inst = r.get('仪器名称', '—')
+            sn = r.get('出厂编号', '—')
+            grp = r.get('所属组别/实验室', '—')
+            cal_date_str = r.get('校准日期', '—')
+            issuer = r.get('机构', '—')
+            src_file = r.get('源文件路径', '')
+            
+            # 从已加载台账中查询原校准日期和周期
+            old_date_str = '—'
+            cycle = 1
+            matched_in_ledger = False
+            
+            cal_obj = parse_date_obj(cal_date_str)
+            
+            if is_quant and code in self.ledger_db.quantitative_map:
+                info = self.ledger_db.quantitative_map[code]
+                old_date_str = str(info.get('last_cal_date') or '—')
+                cycle = info.get('cycle', 1)
+                matched_in_ledger = True
+            elif not is_quant and code in self.ledger_db.quick_check_map:
+                info = self.ledger_db.quick_check_map[code]
+                old_date_str = str(info.get('last_cal_date') or '—')
+                cycle = info.get('cycle', 1)
+                matched_in_ledger = True
+                
+            next_due_str = '—'
+            if cal_obj:
+                next_due = add_years_minus_one_day(cal_obj, cycle)
+                next_due_str = next_due.strftime('%Y-%m-%d')
+                
+            if code not in {'未知编号', '—'} and cal_obj:
+                if matched_in_ledger:
+                    status_text = "🟢 待双向回填"
+                    valid_trace_count += 1
+                else:
+                    status_text = "⚠️ 台账未登记(计划外)"
+                    valid_trace_count += 1
+            else:
+                status_text = "⚪ 未识别设备号/校准日"
+                
+            self.table_traceability.setItem(row_idx, 0, QTableWidgetItem(str(idx)))
+            self.table_traceability.setItem(row_idx, 1, QTableWidgetItem(status_text))
+            self.table_traceability.setItem(row_idx, 2, QTableWidgetItem(code))
+            self.table_traceability.setItem(row_idx, 3, QTableWidgetItem(inst))
+            self.table_traceability.setItem(row_idx, 4, QTableWidgetItem(sn))
+            self.table_traceability.setItem(row_idx, 5, QTableWidgetItem(grp))
+            self.table_traceability.setItem(row_idx, 6, QTableWidgetItem(cal_date_str))
+            self.table_traceability.setItem(row_idx, 7, QTableWidgetItem(old_date_str[:10] if len(old_date_str)>=10 else old_date_str))
+            self.table_traceability.setItem(row_idx, 8, QTableWidgetItem(next_due_str))
+            self.table_traceability.setItem(row_idx, 9, QTableWidgetItem(issuer))
+            self.table_traceability.setItem(row_idx, 10, QTableWidgetItem(os.path.basename(src_file)))
+
+        if hasattr(self, 'lbl_trace_summary'):
+            self.lbl_trace_summary.setText(f"📊 本次待回填: {valid_trace_count} 台 | 计划待收回: {len(missing)} 台")
+        if hasattr(self, 'btn_sync_ledger'):
+            self.btn_sync_ledger.setEnabled(valid_trace_count > 0)
+
+        self.append_log("SUCCESS", f"🎉 处理完成！解析 {total} 份，溯源可回填 {valid_trace_count} 台，计划待收回 {len(missing)} 台，耗时 {time_cost:.2f} 秒")
 
         if mode == 'rename':
             mode_desc = "🏷️ <b>【原目录就地重命名模式】</b>：证书已在其当前原目录内【就地重命名】为标准规范文件名！"
+        elif mode == 'organize':
+            mode_desc = "📁 <b>【原目录按组别归类模式】</b>：证书已在源目录内规范重命名并【移动归入各组别子文件夹】！"
         elif mode == 'copy':
             mode_desc = "📑 <b>【复制归档模式】</b>：证书已规范重命名并【复制】至归档目标库对应分类子文件夹，原始文件完好保留！"
         elif mode == 'move':
@@ -2510,7 +3110,10 @@ class MainWindow(QMainWindow):
             if mode == 'dry_run':
                 notice_banner = ("<div style='background-color:#FEF2F2; color:#991B1B; border:1px solid #FECACA; padding:8px 12px; border-radius:6px; margin-bottom:10px;'>"
                                  "⚠️ <b>温馨提示：</b>您当前运行的是【安全预览模式】，系统仅执行了识别与台账比对，<b>并未改动或移动任何物理文件</b>！<br>"
-                                 "若需重命名或移动归档，请在运行模式中切换为【原目录就地规范重命名】、【复制归档至目标库】或【移动归档至目标库】后再次点击运行。</div>")
+                                 "若需重命名或移动归档，请在运行模式中切换为【原目录按组别归类】、【原目录就地规范重命名】或【复制归档至目标库】后再次点击运行。</div>")
+            elif mode == 'organize':
+                notice_banner = ("<div style='background-color:#F0FDF4; color:#166534; border:1px solid #BBF7D0; padding:8px 12px; border-radius:6px; margin-bottom:10px;'>"
+                                 "✅ <b>组别归类完成：</b>所有扫描到的校准证书已在源目录就地分类归入各组别文件夹！</div>")
             elif mode == 'rename':
                 notice_banner = ("<div style='background-color:#F0FDF4; color:#166534; border:1px solid #BBF7D0; padding:8px 12px; border-radius:6px; margin-bottom:10px;'>"
                                  "✅ <b>重命名完成：</b>所有扫描到的校准证书已在原目录就地完成规范重命名！</div>")
@@ -2525,6 +3128,7 @@ class MainWindow(QMainWindow):
                             f"📂 <b>待处理源目录：</b>{target_dir}<br>"
                             f"🏠 <b>归档目标存放：</b>{dest_display}<br><br>"
                             f"📊 <b>解析总数：</b>{total} 份 (耗时 {time_cost:.2f} 秒)<br>"
+                            f"🔄 <b>量值溯源：</b>可联动回填设备 {valid_trace_count} 台<br>"
                             f"🔍 <b>计划待收回：</b>{len(missing)} 台设备尚未扫描到 2026 证书<br>"
                             f"📋 <b>审计报表：</b>{os.path.basename(self.last_excel_path)}<br>")
             btn_open_src = msg_box.addButton("📂 打开源文件目录", QMessageBox.ActionRole)
@@ -2532,6 +3136,7 @@ class MainWindow(QMainWindow):
             if mode in ('copy', 'move'):
                 btn_open_target = msg_box.addButton("🏠 打开归档目标库", QMessageBox.ActionRole)
             btn_exp = msg_box.addButton("📊 查看汇总 Excel", QMessageBox.ActionRole)
+            btn_sync_now = msg_box.addButton("🔄 立即双向回填台账", QMessageBox.ActionRole)
             btn_audit = msg_box.addButton("🔍 查看待收回清单", QMessageBox.ActionRole)
             btn_ok = msg_box.addButton("确定", QMessageBox.AcceptRole)
             msg_box.exec_()
@@ -2542,6 +3147,9 @@ class MainWindow(QMainWindow):
                 self._open_dir(archive_root)
             elif msg_box.clickedButton() == btn_exp:
                 self.open_excel_report()
+            elif msg_box.clickedButton() == btn_sync_now:
+                self.btn_nav_audit.click()
+                self.on_sync_ledger_clicked()
             elif msg_box.clickedButton() == btn_audit:
                 self.btn_nav_audit.click()
 
@@ -2810,6 +3418,50 @@ class MainWindow(QMainWindow):
                 background-color: #94A3B8;
                 border-color: #94A3B8;
                 color: #E2E8F0;
+            }
+            #btnSuccess {
+                background-color: #10B981;
+                color: #FFFFFF;
+                font-weight: bold;
+                font-size: 13px;
+                border-radius: 6px;
+                padding: 7px 16px;
+                border: none;
+            }
+            #btnSuccess:hover {
+                background-color: #059669;
+            }
+            #btnSuccess:pressed {
+                background-color: #047857;
+            }
+            #btnSuccess:disabled {
+                background-color: #94A3B8;
+                color: #F8FAFC;
+            }
+            QTabWidget::pane {
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                background-color: #FFFFFF;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background-color: #E2E8F0;
+                color: #334155;
+                font-weight: 600;
+                padding: 9px 18px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:hover {
+                background-color: #CBD5E1;
+                color: #0F172A;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFFFF;
+                color: #0284C7;
+                font-weight: bold;
+                border-bottom: 2px solid #0284C7;
             }
             QProgressBar {
                 border: 1px solid #CBD5E1;

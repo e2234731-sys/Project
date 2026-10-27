@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/Powered%20By-%E9%99%88%E8%80%BF%E5%BF%A0%20(CCAA%E5%9B%BD%E5%AE%B6%E6%B3%A8%E5%86%8C%E5%AE%A1%E6%A0%B8%E5%91%98)-0284C7?style=for-the-badge&logo=shield&logoColor=white" />
   <img src="https://img.shields.io/badge/%E6%9D%83%E5%A8%81%E9%99%90%E9%87%8F%E6%95%B0%E6%8D%AE-83,973%20%E6%9D%A1-10B981?style=for-the-badge&logo=databricks&logoColor=white" />
   <img src="https://img.shields.io/badge/%E8%B4%A8%E9%87%8F%E4%BD%93%E7%B3%BB-ISO%2FIEC%2017025%20%7C%20RB%2FT%20214-F59E0B?style=for-the-badge" />
-  <a href="https://github.com/e2234731-sys/Project/releases/tag/V1.0"><img src="https://img.shields.io/badge/Release-V1.0%20Official-blue?style=for-the-badge&logo=github" /></a>
+  <a href="https://github.com/e2234731-sys/Project/releases/tag/V1.1"><img src="https://img.shields.io/badge/Release-V1.1%20Official-blue?style=for-the-badge&logo=github" /></a>
 </p>
 
 ---
@@ -19,7 +19,8 @@
 > **💡 核心设计理念**：
 > 1. **全景数据内置**：收录 6 大核心国家标准现行有效限量共计 **83,973 条**，纯离线秒级检索；
 > 2. **极致生产力**：从传统的“翻纸质标准/查PDF表格”进化为“Excel 批量导入 ➔ 表头自适应 ➔ 毫秒级多项目合规判定”；
-> 3. **合规严谨性**：内置添加剂比例之和、致病菌三级采样规则、脱水折算系数及计量期间核查算法。
+> 3. **全线集成检验方法**：全面覆盖 GB 5009、GB 23200、GB 4789、GB 31658 及 2026 年国家食品安全抽检细则推荐方法；
+> 4. **合规严谨性**：内置添加剂比例之和、致病菌三级采样规则、脱水折算系数及计量期间核查算法。
 
 ---
 
@@ -38,36 +39,42 @@
 
 ---
 
-## 🚀 八大核心功能矩阵 (Key Features)
+## 🚀 九大核心功能矩阵 (Key Features)
 
-### 1️⃣ 宽幅样品类别智能检索与合规判定
+### 1️⃣ 权威检验方法智能匹配与全流程指引 (V1.1 重磅升级)
+* **全表贯通检验方法**：在多项目批量判定、标准查询与样品匹配所有核心表格中增设独立的 **【检验方法】** 列；
+* **权威多层匹配引擎**：融合 GB 2762、GB 2763、GB 29921 自带方法与《2026年国家食品安全抽检实施细则》官方推荐方法，覆盖 GB 5009.xx、GB 23200.xx、GB 4789.xx、GB 31658.xx 等上百个细分检测方法；
+* **详情与导出联动**：双击详情卡片支持一键复制检验方法标准号，导出 CSV/Excel 报告自动携带方法依据。
+
+### 2️⃣ 宽幅样品类别智能检索与合规判定
 * 采用大宽度、高清晰度的 **样品/食品类别智能下拉菜单 (Combobox)**；
 * 支持按“标准名称”、“食品类别/原料”、“检测项目/添加剂”即时多条件联合过滤；
 * 录入实验室实测值（支持一键填入“ND / 0”），瞬间输出【✅ 合格】或【❌ 不合格】结论与法律法规条款依据。
 
-### 2️⃣ 多项目 Excel 批量导入与表头自适应核查
-* 支持直接导入化验室日常检测台账与 LIMS 导出的 Excel / CSV 表格；
-* **表头智能筛选与列宽记忆**：自适应对齐“样品名称”、“检测项目”、“实测浓度”，一键完成全批次判定并导出着色高亮分析报告。
+### 3️⃣ 多项目批量输入与输入顺序严格保留
+* **按录入顺序逐项呈现**：彻底解决传统搜索乱序问题，严格以化验员输入的项目先后顺序自上而下呈现；
+* **未判定项规范标注**：未录入实测值或无判定项统一规范标注为 `/`；
+* **多维智能筛选工具栏**：提供判定结论过滤（全部/超标/合格/未判定）、标准代号过滤与检验方法/关键词模糊过滤。
 
-### 3️⃣ GB 2760 食品添加剂同一功能复配比例之和智能计算器
+### 4️⃣ GB 2760 食品添加剂同一功能复配比例之和智能计算器
 * 严格遵循 GB 2760-2024 第 4.4 条规范：
   $$\sum \frac{\text{实测值}_i}{\text{最大允许限量}_i} \le 1.0$$
 * 自动匹配防腐剂组（脱氢乙酸+山梨酸+苯甲酸）、着色剂组（柠檬黄+日落黄）、抗氧化剂组（TBHQ+BHA+BHT），图形化渲染比例占用堆叠图。
 
-### 4️⃣ 微生物致病菌三级采样规则判定引擎
+### 5️⃣ 微生物致病菌三级采样规则判定引擎
 * 内置预包装食品 GB 29921 / GB 31607 采样方案：
   $$\text{判定合规条件：} \quad c \le c_{\text{max}} \quad \text{且} \quad \forall x_i \le M \quad \text{且} \quad (m < x_i \le M) \le c$$
 
-### 5️⃣ GB 2762 脱水干制品与浓缩系数折算换算器
+### 6️⃣ GB 2762 脱水干制品与浓缩系数折算换算器
 * 针对干食用菌、脱水蔬菜、浓缩果汁、乳粉等制品，依据水分含量与浓缩比自动反推原鲜品限量，杜绝误判漏判。
 
-### 6️⃣ GB/T 27404-2026 实验室理化质控分析系统
+### 7️⃣ GB/T 27404-2026 实验室理化质控分析系统
 * 涵盖空白试验、平行双样精密度 (RSD)、基质加标回收率计算、Shewhart / Westgard 质控图与质控预警分析。
 
-### 7️⃣ 能力验证与盲样考核数据统计预评系统 (ISO 13528 / CNAS-GL002)
+### 8️⃣ 能力验证与盲样考核数据统计预评系统 (ISO 13528 / CNAS-GL002)
 * 提供 Algorithm A 稳健均值与稳健标准差、Grubbs / Dixon 离群值检验、Z-Score / En-Value 评分与雷达图评估。
 
-### 8️⃣ 实验室仪器计量校准确认与期间核查管理系统 (ISO 17025)
+### 9️⃣ 实验室仪器计量校准确认与期间核查管理系统 (ISO 17025)
 * 覆盖色谱仪、质谱仪、原子吸收、天平等仪器检定/校准证书确认（MPEV 最大允许误差比对）与核查计划调度。
 
 ---
@@ -77,11 +84,11 @@
 本工作台采用独立单文件绿色免安装打包，**无需安装 Python 环境，开箱即用**：
 
 | 版本类型 | 发布包文件名 | 体积 | 下载直链 |
-| :--- | :--- | :---: | :---: |
-| **全功能增强版 (推荐)** | `FoodSafetyStandardChecker_Full_BatchFilter_V1.0.exe` | 61.92 MB | [📥 点击下载全功能版](https://github.com/e2234731-sys/Project/releases/download/V1.0/FoodSafetyStandardChecker_Full_BatchFilter_V1.0.exe) |
-| **纯净极速版** | `FoodSafetyStandardChecker_Clean_V1.0.exe` | 31.99 MB | [📥 点击下载纯净版](https://github.com/e2234731-sys/Project/releases/download/V1.0/FoodSafetyStandardChecker_Clean_V1.0.exe) |
+| :--- | :--- | :---: | :--- |
+| **全功能增强版 (推荐)** | `FoodSafetyStandardChecker_Full_BatchFilter_V1.1.exe` | 61.96 MB | [📥 点击直接下载全功能版 (V1.1 最新版)](https://github.com/e2234731-sys/Project/releases/download/V1.1/FoodSafetyStandardChecker_Full_BatchFilter_V1.1.exe) |
+| **纯净极速版** | `FoodSafetyStandardChecker_Clean_V1.1.exe` | 31.99 MB | [📥 点击直接下载纯净版 (V1.1 最新版)](https://github.com/e2234731-sys/Project/releases/download/V1.1/FoodSafetyStandardChecker_Clean_V1.1.exe) |
 
-> 🔖 完整版本发布历史与更新日志请见：[GitHub Releases 官方发布页](https://github.com/e2234731-sys/Project/releases/tag/V1.0)
+> 🔖 完整版本发布历史与更新日志请见：[GitHub Releases 官方发布页](https://github.com/e2234731-sys/Project/releases/tag/V1.1)
 
 ---
 

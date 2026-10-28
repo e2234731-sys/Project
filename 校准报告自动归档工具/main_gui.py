@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FQT 实验室校准证书智能归档与量值溯源工作台 V2.5
+FQT 实验室校准证书智能归档与量值溯源工作台 V2.6
 ======================================================================
 1. 【现代化双轨工作台架构】
    - 🏢 17025定量实验室设备校准工作台
@@ -174,7 +174,7 @@ def init_rapidocr():
 
 ocr_engine, HAS_OCR = init_rapidocr()
 
-VERSION = "V2.5"
+VERSION = "V2.6"
 APP_NAME = "FQT 实验室校准证书智能归档与管理工作台"
 
 STANDARD_GROUPS = [
@@ -222,6 +222,8 @@ ISSUER_LABEL = {
     'NEM':     '广州中广测',
     'SMQ':     '深圳计量院',
     'CCIC':    '中检深圳',
+    'LISAI':   '广州力赛',
+    'ZH':      '深圳中恒',
     'UNKNOWN': '第三方机构',
 }
 
@@ -231,6 +233,8 @@ ISSUER_SHORT_NAME = {
     'NEM':     '中广测',
     'SMQ':     '深圳计量院',
     'CCIC':    '中检',
+    'LISAI':   '力赛',
+    'ZH':      '中恒',
     'UNKNOWN': '第三方',
 }
 
@@ -346,17 +350,39 @@ def is_text_garbled_or_image(text, min_chinese=4):
     chinese_chars = re.findall(r'[\u4e00-\u9fa5]', text)
     return len(chinese_chars) < min_chinese
 
-def identify_issuer(text_clean):
+def identify_issuer(text_clean, text_p1_clean=None):
+    # 若传入了首页清洗文本，优先匹配首页发证机构抬头（杜绝内页标准器具溯源单位误判）
+    if text_p1_clean:
+        if re.search(r'深圳中恒|中恒检测|zh-lab\.com|CNASL7054|ZHLH|ZHLX|ZHRG|ZHJS', text_p1_clean, re.IGNORECASE):
+            return 'ZH'
+        if re.search(r'广州力赛|力赛计量|力赛|lisaitest\.com|CNASL7127', text_p1_clean, re.IGNORECASE):
+            return 'LISAI'
+        if re.search(r'帝恩|DNTesting|CNASL6483', text_p1_clean, re.IGNORECASE):
+            return 'DN'
+        if re.search(r'达丰|DAF|DAFTJAX|DAFCJAX|DAFGJAX|CNASL6592', text_p1_clean, re.IGNORECASE):
+            return 'DAF'
+        if re.search(r'中广测|广州分析测试中心|广东省测试分析研究所|NEM|TiC2600|CNASL7613|gznem\.com', text_p1_clean, re.IGNORECASE):
+            return 'NEM'
+        if re.search(r'中检|CCIC|ccic-mts\.com|CNASL3103', text_p1_clean, re.IGNORECASE):
+            return 'CCIC'
+        if re.search(r'深圳市计量质量检测研究院|深圳计量院|smq\.com\.cn|CNASL0579|SZJLY', text_p1_clean, re.IGNORECASE):
+            return 'SMQ'
+
+    # 全文特征匹配
+    if re.search(r'深圳中恒|中恒检测|zh-lab\.com|CNASL7054|ZHLH|ZHLX|ZHRG|ZHJS', text_clean, re.IGNORECASE):
+        return 'ZH'
+    if re.search(r'广州力赛|力赛计量|力赛|lisaitest\.com|CNASL7127', text_clean, re.IGNORECASE):
+        return 'LISAI'
     if re.search(r'帝恩|DNTesting|CNASL6483', text_clean, re.IGNORECASE):
         return 'DN'
     if re.search(r'达丰|DAF|DAFTJAX|DAFCJAX|DAFGJAX|CNASL6592', text_clean, re.IGNORECASE):
         return 'DAF'
     if re.search(r'中广测|广州分析测试中心|广东省测试分析研究所|NEM|TiC2600|CNASL7613|gznem\.com', text_clean, re.IGNORECASE):
         return 'NEM'
-    if re.search(r'深圳市计量质量检测研究院|深圳计量院|smq\.com\.cn|CNASL0579|SZJLY', text_clean, re.IGNORECASE):
-        return 'SMQ'
     if re.search(r'中检|CCIC|ccic-mts\.com|CNASL3103', text_clean, re.IGNORECASE):
         return 'CCIC'
+    if re.search(r'深圳市计量质量检测研究院|深圳计量院|smq\.com\.cn|CNASL0579|SZJLY', text_clean, re.IGNORECASE):
+        return 'SMQ'
     return 'UNKNOWN'
 
 
@@ -671,17 +697,24 @@ class LedgerDatabase:
         # 启发式仪器与组别智能映射
         grp_fallback = '未知组别'
         dev_type = '未知'
-        if inst_name:
-            if any(k in inst_name for k in ['液相', 'HPLC', '荧光检测器', '二极管阵列', 'U3000']):
-                grp_fallback = '液相组'
+
+        # 优先由资产编号前缀推导
+        if asset_no:
+            if re.match(r'^(WJ|WSJ)', asset_no, re.I):
+                grp_fallback = '抽样组'
                 dev_type = '定量'
-            elif any(k in inst_name for k in ['气相', 'GC', '顶空', 'ECD', 'FID', 'FPD']):
+
+        if grp_fallback == '未知组别' and inst_name:
+            if any(k in inst_name for k in ['气相', 'GC', '顶空', 'ECD', 'FID', 'FPD']):
                 grp_fallback = '气相组'
                 dev_type = '定量'
-            elif any(k in inst_name for k in ['离子计', '折光仪', '折射仪', '酸度计', 'pH计', '旋光仪', '电导率', '水分仪', '天平', '分析天平']):
+            elif any(k in inst_name for k in ['液相', 'HPLC', '荧光检测器', '二极管阵列', 'U3000', '质谱联用']):
+                grp_fallback = '液相组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['离子计', '折光仪', '折射仪', '酸度计', 'pH计', '旋光仪', '电导率', '水分仪', '天平', '分析天平', '马弗炉', '电阻炉', '消解', '滴定', '定氮']):
                 grp_fallback = '理化组'
                 dev_type = '定量'
-            elif any(k in inst_name for k in ['培养箱', '生化培养箱', '灭菌器', '蒸汽灭菌', '生物安全柜', '超净工作台', '菌落计数']):
+            elif any(k in inst_name for k in ['培养箱', '生化培养箱', '灭菌器', '蒸汽灭菌', '生物安全柜', '超净工作台', '菌落计数', '超纯水']):
                 grp_fallback = '微生物组'
                 dev_type = '定量'
             elif any(k in inst_name for k in ['ICP', '原子吸收', 'AAS', '原子荧光', 'AFS', '测汞仪', '重金属']):
@@ -690,8 +723,11 @@ class LedgerDatabase:
             elif any(k in inst_name for k in ['标准筛', '分样筛', '药典筛', '试验筛', '振筛机', '制样']):
                 grp_fallback = '运行组'
                 dev_type = '定量'
-            elif any(k in inst_name for k in ['温湿度', '温湿度计', '温度计', '温湿度记录仪']):
+            elif any(k in inst_name for k in ['温湿度', '温湿度计', '温度计', '温湿度记录仪', '秒表', '电子秤']):
                 grp_fallback = '综合组'
+                dev_type = '定量'
+            elif any(k in inst_name for k in ['车载冰箱', '便携式冰箱', '冷藏箱']):
+                grp_fallback = '抽样组'
                 dev_type = '定量'
 
         return {
@@ -1197,21 +1233,41 @@ def extract_generic(text, text_clean, ledger, filename="", doc=None):
             if asset_cand in ledger.all_known_assets or re.match(r'^(H\d{4}|YYQ\d+|WJ\d+|MDP\d+|KJ\d+)', asset_cand, re.I):
                 asset_no = asset_cand
 
+    # 通用管理号/设备编号正则提取
+    if not asset_no:
+        for l in lines:
+            m_a = re.search(r'(?:管\s*理\s*编\s*号|管\s*理\s*号|设\s*备\s*编\s*号|资\s*产\s*编\s*号)\s*[：:]\s*([A-Za-z0-9\-]+)', l)
+            if m_a:
+                cand = m_a.group(1).strip()
+                if cand not in {'NAN', 'NONE', 'NO', 'NULL'}:
+                    asset_no = cand
+                    break
+
     if not asset_no:
         for asset in ledger.sorted_asset_list:
             if asset in text or (filename and asset in filename):
                 asset_no = asset
                 break
 
+    asset_no = re.sub(r'^(?:管\s*理\s*编\s*号|管\s*理\s*号|设\s*备\s*编\s*号)\s*[：:]\s*', '', asset_no or '').strip()
     asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
 
     inst_name = ''
-    for i, l in enumerate(lines):
-        if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
-            cand = lines[i+1].strip()
-            if cand and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+    for l in lines:
+        m_i = re.search(r'(?:器\s*具\s*名\s*称|仪\s*器\s*名\s*称|样\s*品\s*名\s*称)\s*[：:]\s*([^\n\r]+)', l)
+        if m_i:
+            cand = m_i.group(1).strip()
+            if cand and not any(k in cand for k in ['Name of', 'Type', 'Model', '规格', '型号', 'Description']):
                 inst_name = cand
                 break
+
+    if not inst_name:
+        for i, l in enumerate(lines):
+            if re.search(r'仪\s*器\s*名\s*称|样\s*品\s*名\s*称|器\s*具\s*名\s*称|Description', l, re.I) and i+1 < len(lines):
+                cand = lines[i+1].strip()
+                if cand and cand.lower() != 'description' and not any(b in cand for b in ['Model', 'Type', 'Serial', 'Asset', 'Manufacturer', '型号', '出厂']):
+                    inst_name = cand
+                    break
 
     info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
     if not inst_name or inst_name == '未查找到':
@@ -1219,7 +1275,7 @@ def extract_generic(text, text_clean, ledger, filename="", doc=None):
 
     cal_raw = ""
     for i, l in enumerate(lines):
-        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期)', l, re.I):
+        if re.search(r'(?:Date of Calibr|校\s*准\s*日\s*期|检\s*定\s*日\s*期|检\s*测\s*日\s*期|Test\s*Date)', l, re.I):
             for j in range(i+1, min(i+4, len(lines))):
                 m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
                 if m_d:
@@ -1228,7 +1284,7 @@ def extract_generic(text, text_clean, ledger, filename="", doc=None):
             if cal_raw: break
 
     if not cal_raw:
-        m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|Date\s*of\s*Calibration)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
+        m_cal = re.search(r'(?:校\s*准\s*日\s*期|检\s*定\s*日\s*期|检\s*测\s*日\s*期|Date\s*of\s*Calibration|Test\s*Date)[^\n\r\d]*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', text, re.I)
         if m_cal and m_cal.group(1):
             cal_raw = m_cal.group(1)
 
@@ -1242,6 +1298,203 @@ def extract_generic(text, text_clean, ledger, filename="", doc=None):
         'group': info.get('group', '未知组别'),
         'lab_name': info.get('lab', '未知实验室'),
         'device_type': info.get('type', '未知')
+    }
+
+
+def extract_lisai(text, text_clean, ledger, filename="", doc=None):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    asset_no = ''
+    serial_no = ''
+    inst_name = ''
+    cal_date = ''
+    issue_date = ''
+
+    # 1. 管理号 / 设备编号
+    for i, l in enumerate(lines):
+        if re.search(r'管\s*理\s*号|Asset\s*No', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                cand = lines[j].strip()
+                if cand and not any(k in cand for k in ['Date', 'Receipt', 'Calibration', '接收', '校准', 'Asset', 'No']):
+                    asset_no = cand
+                    break
+            if asset_no: break
+
+    # 2. 出厂编号
+    for i, l in enumerate(lines):
+        if re.search(r'出\s*厂\s*编\s*号|Serial\s*No', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                cand = lines[j].strip()
+                if cand and not any(k in cand for k in ['管', 'Asset', 'Date', 'Receipt', 'Calibration', '接收', '校准', 'Serial', 'No']):
+                    serial_no = cand
+                    break
+            if serial_no: break
+
+    # 3. 仪器/样品名称 (过滤英文 Description 占位)
+    for i, l in enumerate(lines):
+        if re.search(r'仪\s*器\s*/?\s*样\s*品\s*名\s*称|样\s*品\s*名\s*称', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                cand = lines[j].strip()
+                if cand and cand.lower() != 'description' and not any(k in cand for k in ['Model', 'Type', '型号', '规格', 'Manufacturer', '制造']):
+                    inst_name = cand
+                    break
+            if inst_name: break
+
+    # 4. 校准日期
+    for i, l in enumerate(lines):
+        if re.search(r'校\s*准\s*日\s*期|Date\s*of\s*Calibration', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                if m_d:
+                    cal_date = m_d.group(1)
+                    break
+            if cal_date: break
+
+    # 5. 发布/签发日期
+    for i, l in enumerate(lines):
+        if re.search(r'发\s*布\s*日\s*期|Issued\s*Date|批\s*准\s*日\s*期', l, re.I):
+            for j in range(i+1, min(i+4, len(lines))):
+                m_d = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[j])
+                if m_d:
+                    issue_date = m_d.group(1)
+                    break
+            if issue_date: break
+
+    if not asset_no and filename:
+        m_fn = re.search(r'[(（]([A-Za-z0-9\-]+)[)）]', filename)
+        if m_fn:
+            asset_no = m_fn.group(1).strip()
+    if not asset_no:
+        for a in ledger.sorted_asset_list:
+            if a in text or (filename and a in filename):
+                asset_no = a
+                break
+
+    asset_no = re.sub(r'^(?:管\s*理\s*号|Asset\s*No\.?)\s*[：:]\s*', '', asset_no or '').strip()
+    asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
+    cal_date_norm = normalize_date(cal_date, filename=filename)
+    issue_date_norm = normalize_date(issue_date, filename=filename)
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
+    if not asset_no and info.get('asset_no') != '未知编号':
+        asset_no = info.get('asset_no')
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+
+    return {
+        'asset_no': asset_no or '未知编号',
+        'serial_no': serial_no or '',
+        'inst_name': inst_name,
+        'cal_date': cal_date_norm,
+        'issue_date': issue_date_norm,
+        'group': info.get('group', '未知组别'),
+        'lab_name': info.get('lab', '定量实验室'),
+        'device_type': info.get('type', '定量')
+    }
+
+
+def extract_zh(text, text_clean, ledger, filename="", doc=None):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    asset_no = ''
+    serial_no = ''
+    inst_name = ''
+    cal_date = ''
+    issue_date = ''
+
+    for l in lines:
+        # 管理编号
+        m_a = re.search(r'管\s*理\s*编\s*号\s*[：:]\s*([A-Za-z0-9\-]+)', l)
+        if m_a and not asset_no:
+            asset_no = m_a.group(1).strip()
+
+        # 仪器编号 / 出厂编号
+        m_s = re.search(r'(?:仪\s*器\s*编\s*号|出\s*厂\s*编\s*号)\s*[：:]\s*([^/\s\n\r]+)', l)
+        if m_s and not serial_no:
+            sn_val = m_s.group(1).strip()
+            if sn_val != '/':
+                serial_no = sn_val
+
+        # 器具名称 / 仪器名称
+        m_i = re.search(r'(?:器\s*具\s*名\s*称|仪\s*器\s*名\s*称)\s*[：:]\s*([^\n\r]+)', l)
+        if m_i and not inst_name:
+            cand = m_i.group(1).strip()
+            if cand and not any(k in cand for k in ['Name of', 'Type', 'Model', '规格', '型号']):
+                inst_name = cand
+
+        # 校准日期 / 检测日期 / 检定日期
+        m_d = re.search(r'(?:校\s*准\s*日\s*期|检\s*测\s*日\s*期|检\s*定\s*日\s*期)\s*[：:]\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', l)
+        if m_d and not cal_date:
+            cal_date = m_d.group(1).strip()
+
+        # 发布日期
+        m_iss = re.search(r'发\s*布\s*日\s*期\s*[：:]\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', l)
+        if m_iss and not issue_date:
+            issue_date = m_iss.group(1).strip()
+
+    # 标签与值换行格式兜底
+    if not asset_no:
+        for i, l in enumerate(lines):
+            if re.search(r'^管\s*理\s*编\s*号\s*[：:]?$', l) and i+1 < len(lines):
+                cand = lines[i+1].strip()
+                if re.match(r'^[A-Za-z0-9\-]+$', cand):
+                    asset_no = cand
+                    break
+
+    if not serial_no:
+        for i, l in enumerate(lines):
+            if re.search(r'^(?:仪\s*器\s*编\s*号|出\s*厂\s*编\s*号)\s*[：:]?$', l) and i+1 < len(lines):
+                cand = lines[i+1].strip()
+                if cand != '/' and not any(k in cand for k in ['Serial', 'Management', 'Date']):
+                    serial_no = cand
+                    break
+
+    if not inst_name:
+        for i, l in enumerate(lines):
+            if re.search(r'^(?:器\s*具\s*名\s*称|仪\s*器\s*名\s*称)\s*[：:]?$', l) and i+1 < len(lines):
+                cand = lines[i+1].strip()
+                if not any(k in cand for k in ['Name of', 'Type', 'Model']):
+                    inst_name = cand
+                    break
+
+    if not cal_date:
+        for i, l in enumerate(lines):
+            if re.search(r'^(?:校\s*准\s*日\s*期|检\s*测\s*日\s*期|Test\s*Date|Calibration\s*Date)\s*[：:]?$', l) and i+1 < len(lines):
+                m = re.search(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)', lines[i+1])
+                if m:
+                    cal_date = m.group(1)
+                    break
+
+    if not asset_no and filename:
+        m_fn = re.search(r'[(（]([A-Za-z0-9\-]+)[)）]', filename)
+        if m_fn:
+            asset_no = m_fn.group(1).strip()
+
+    if not asset_no:
+        for a in ledger.sorted_asset_list:
+            if a in text or (filename and a in filename):
+                asset_no = a
+                break
+
+    # 清理并消除标签残留
+    asset_no = re.sub(r'^(?:管\s*理\s*编\s*号|管理编号)\s*[：:]\s*', '', asset_no or '').strip()
+    asset_no = re.sub(r'^HO(\d+)$', r'H0\1', asset_no or '')
+    cal_date_norm = normalize_date(cal_date, filename=filename)
+    issue_date_norm = normalize_date(issue_date, filename=filename)
+
+    info = ledger.query(asset_no=asset_no, serial_no=serial_no, inst_name=inst_name)
+    if not asset_no and info.get('asset_no') != '未知编号':
+        asset_no = info.get('asset_no')
+    if not inst_name or inst_name == '未查找到':
+        inst_name = info.get('inst') if info.get('inst') not in {'未查找到', 'nan', 'None'} else '未查找到'
+
+    return {
+        'asset_no': asset_no or '未知编号',
+        'serial_no': serial_no or '',
+        'inst_name': inst_name,
+        'cal_date': cal_date_norm,
+        'issue_date': issue_date_norm,
+        'group': info.get('group', '未知组别'),
+        'lab_name': info.get('lab', '定量实验室'),
+        'device_type': info.get('type', '定量')
     }
 
 
@@ -1686,17 +1939,22 @@ class ArchiveWorker(QThread):
             text = ""
             used_ocr = False
             doc = None
+            p1_text = ""
             try:
                 if fitz is not None:
                     doc = fitz.open(pdf_path)
                     for p_i in range(min(3, len(doc))):
                         page = doc[p_i]
                         p_text = page.get_text("text") or ''
+                        if p_i == 0:
+                            p1_text = p_text
                         if is_text_garbled_or_image(p_text, min_chinese=4) and self.enable_ocr and HAS_OCR and ocr_engine:
                             pix = page.get_pixmap(dpi=200)
                             ocr_res, _ = ocr_engine(pix.tobytes("png"))
                             if ocr_res:
                                 p_text = '\n'.join([line[1] for line in ocr_res])
+                                if p_i == 0:
+                                    p1_text = p_text
                                 used_ocr = True
                         text += p_text + '\n'
             except Exception as e:
@@ -1708,8 +1966,9 @@ class ArchiveWorker(QThread):
                 continue
 
             text_clean = text.replace(' ', '').replace('\n', '')
+            text_p1_clean = p1_text.replace(' ', '').replace('\n', '')
 
-            if (len(text_clean.strip()) < 30 or identify_issuer(text_clean) == 'UNKNOWN' or is_text_garbled_or_image(text, min_chinese=6)) and self.enable_ocr and HAS_OCR and ocr_engine and not used_ocr:
+            if (len(text_clean.strip()) < 30 or identify_issuer(text_clean, text_p1_clean=text_p1_clean) == 'UNKNOWN' or is_text_garbled_or_image(text, min_chinese=6)) and self.enable_ocr and HAS_OCR and ocr_engine and not used_ocr:
                 try:
                     ocr_total = ""
                     if doc is not None:
@@ -1717,20 +1976,26 @@ class ArchiveWorker(QThread):
                             pix = doc[p_i].get_pixmap(dpi=200)
                             ocr_res, _ = ocr_engine(pix.tobytes("png"))
                             if ocr_res:
-                                ocr_total += '\n' + '\n'.join([line[1] for line in ocr_res])
+                                page_ocr = '\n'.join([line[1] for line in ocr_res])
+                                if p_i == 0:
+                                    p1_text = page_ocr
+                                ocr_total += '\n' + page_ocr
                     if ocr_total:
                         text = ocr_total
                         text_clean = text.replace(' ', '').replace('\n', '')
+                        text_p1_clean = p1_text.replace(' ', '').replace('\n', '')
                         used_ocr = True
                 except Exception:
                     pass
 
-            issuer = identify_issuer(text_clean)
+            issuer = identify_issuer(text_clean, text_p1_clean=text_p1_clean)
             if issuer == 'DN': fields = extract_dn(text, text_clean, ledger, filename=filename, doc=doc)
             elif issuer == 'DAF': fields = extract_daf(text, text_clean, ledger, filename=filename, doc=doc)
             elif issuer == 'NEM': fields = extract_nem(text, text_clean, ledger, filename=filename, doc=doc)
             elif issuer == 'SMQ': fields = extract_smq(text, text_clean, ledger, filename=filename, doc=doc)
             elif issuer == 'CCIC': fields = extract_ccic(text, text_clean, ledger, filename=filename, doc=doc)
+            elif issuer == 'LISAI': fields = extract_lisai(text, text_clean, ledger, filename=filename, doc=doc)
+            elif issuer == 'ZH': fields = extract_zh(text, text_clean, ledger, filename=filename, doc=doc)
             else: fields = extract_generic(text, text_clean, ledger, filename=filename, doc=doc)
 
             if (not fields.get('group') or fields.get('group') in {'未知组别', '未知'}) and filename:
@@ -1758,12 +2023,15 @@ class ArchiveWorker(QThread):
                     if ocr_total:
                         text = ocr_total
                         text_clean = text.replace(' ', '').replace('\n', '')
-                        issuer = identify_issuer(text_clean)
+                        text_p1_clean = p1_text.replace(' ', '').replace('\n', '')
+                        issuer = identify_issuer(text_clean, text_p1_clean=text_p1_clean)
                         if issuer == 'DN': fields = extract_dn(text, text_clean, ledger, filename=filename, doc=doc)
                         elif issuer == 'DAF': fields = extract_daf(text, text_clean, ledger, filename=filename, doc=doc)
                         elif issuer == 'NEM': fields = extract_nem(text, text_clean, ledger, filename=filename, doc=doc)
                         elif issuer == 'SMQ': fields = extract_smq(text, text_clean, ledger, filename=filename, doc=doc)
                         elif issuer == 'CCIC': fields = extract_ccic(text, text_clean, ledger, filename=filename, doc=doc)
+                        elif issuer == 'LISAI': fields = extract_lisai(text, text_clean, ledger, filename=filename, doc=doc)
+                        elif issuer == 'ZH': fields = extract_zh(text, text_clean, ledger, filename=filename, doc=doc)
                         else: fields = extract_generic(text, text_clean, ledger, filename=filename, doc=doc)
                         used_ocr = True
                 except Exception:

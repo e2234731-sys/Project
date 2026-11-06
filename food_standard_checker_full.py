@@ -3255,32 +3255,32 @@ class FoodStandardChecker:
         grid_card = tb.Labelframe(main_frame, text="📋 智能反写结果实时全景预览 (双击查看完整指标卡片，悬停展开完整检验方法)", padding=6)
         grid_card.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        columns = ("seq", "food", "item", "std_code", "std_name", "limit", "method", "lod", "meas", "judge", "status")
+        columns = ("序号", "样品名称", "检测项目", "判定标准", "标准全称", "限量要求", "检验方法", "检出限(LOD)", "实测值", "判定结论", "匹配状态")
         self.backfill_tree = ttk.Treeview(grid_card, columns=columns, show='headings', selectmode='browse')
         
-        self.backfill_tree.heading("seq", text="序号")
-        self.backfill_tree.heading("food", text="样品名称")
-        self.backfill_tree.heading("item", text="检测项目")
-        self.backfill_tree.heading("std_code", text="判定标准代号")
-        self.backfill_tree.heading("std_name", text="判定标准全称")
-        self.backfill_tree.heading("limit", text="【反写】标准限量")
-        self.backfill_tree.heading("method", text="【反写】推荐检验方法")
-        self.backfill_tree.heading("lod", text="【反写】检出限(LOD)")
-        self.backfill_tree.heading("meas", text="实测值")
-        self.backfill_tree.heading("judge", text="判定结论")
-        self.backfill_tree.heading("status", text="匹配状态")
+        self.backfill_tree.heading("序号", text="序号")
+        self.backfill_tree.heading("样品名称", text="样品名称")
+        self.backfill_tree.heading("检测项目", text="检测项目")
+        self.backfill_tree.heading("判定标准", text="判定标准代号")
+        self.backfill_tree.heading("标准全称", text="判定标准全称")
+        self.backfill_tree.heading("限量要求", text="【反写】标准限量")
+        self.backfill_tree.heading("检验方法", text="【反写】推荐检验方法")
+        self.backfill_tree.heading("检出限(LOD)", text="【反写】检出限(LOD)")
+        self.backfill_tree.heading("实测值", text="实测值")
+        self.backfill_tree.heading("判定结论", text="判定结论")
+        self.backfill_tree.heading("匹配状态", text="匹配状态")
 
-        self.backfill_tree.column("seq", width=50, anchor="center")
-        self.backfill_tree.column("food", width=130, anchor="w")
-        self.backfill_tree.column("item", width=120, anchor="w")
-        self.backfill_tree.column("std_code", width=130, anchor="w")
-        self.backfill_tree.column("std_name", width=160, anchor="w")
-        self.backfill_tree.column("limit", width=110, anchor="center")
-        self.backfill_tree.column("method", width=280, anchor="w")
-        self.backfill_tree.column("lod", width=170, anchor="w")
-        self.backfill_tree.column("meas", width=75, anchor="center")
-        self.backfill_tree.column("judge", width=95, anchor="center")
-        self.backfill_tree.column("status", width=120, anchor="center")
+        self.backfill_tree.column("序号", width=50, anchor="center")
+        self.backfill_tree.column("样品名称", width=130, anchor="w")
+        self.backfill_tree.column("检测项目", width=120, anchor="w")
+        self.backfill_tree.column("判定标准", width=130, anchor="w")
+        self.backfill_tree.column("标准全称", width=160, anchor="w")
+        self.backfill_tree.column("限量要求", width=110, anchor="center")
+        self.backfill_tree.column("检验方法", width=280, anchor="w")
+        self.backfill_tree.column("检出限(LOD)", width=170, anchor="w")
+        self.backfill_tree.column("实测值", width=75, anchor="center")
+        self.backfill_tree.column("判定结论", width=95, anchor="center")
+        self.backfill_tree.column("匹配状态", width=120, anchor="center")
 
         self.apply_tree_column_widths(self.backfill_tree, "backfill_tree", self.default_backfill_widths)
         self.setup_tree_context_menu(self.backfill_tree, "backfill_tree", self.default_backfill_widths, self.on_backfill_tree_double_click)
@@ -5585,6 +5585,11 @@ class FoodStandardChecker:
                 config['batch_tree'] = {col: self.batch_tree.column(col, 'width') for col in self.batch_columns}
         except Exception:
             pass
+        try:
+            if hasattr(self, 'backfill_tree') and self.backfill_tree.winfo_exists():
+                config['backfill_tree'] = {col: self.backfill_tree.column(col, 'width') for col in self.backfill_tree['columns']}
+        except Exception:
+            pass
         save_ui_config(config)
 
     def open_column_visibility_dialog(self, tree, tree_key, default_widths):
@@ -5616,20 +5621,25 @@ class FoodStandardChecker:
         """从本地持久化配置中恢复记忆的列宽与隐藏状态"""
         saved_widths = self.ui_config.get(tree_key, {})
         hidden_cols = self.ui_config.get('hidden_columns', {}).get(tree_key, [])
+        valid_cols = set(tree['columns'])
         
         for col, default_w in default_widths.items():
-            if col in hidden_cols:
-                tree.column(col, width=0, minwidth=0, stretch=False)
-            else:
-                w = saved_widths.get(col, default_w)
-                try:
-                    w_int = int(w)
-                    # 针对检验方法列，若历史配置过窄则自动纠偏至 280px 防截断
-                    if "方法" in col and w_int < 260:
-                        w_int = max(default_w, 280)
-                    tree.column(col, width=w_int, minwidth=30, stretch=True)
-                except Exception:
-                    tree.column(col, width=default_w, minwidth=30, stretch=True)
+            if col not in valid_cols:
+                continue
+            try:
+                if col in hidden_cols:
+                    tree.column(col, width=0, minwidth=0, stretch=False)
+                else:
+                    w = saved_widths.get(col, default_w)
+                    try:
+                        w_int = int(w)
+                        if "方法" in col and w_int < 260:
+                            w_int = max(default_w, 280)
+                        tree.column(col, width=w_int, minwidth=30, stretch=True)
+                    except Exception:
+                        tree.column(col, width=default_w, minwidth=30, stretch=True)
+            except Exception:
+                pass
 
     def autofit_tree_columns(self, tree, columns=None, min_w=80, max_w=500):
         """根据当前表格中的内容自动计算并调整最佳列宽"""

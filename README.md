@@ -1,26 +1,30 @@
-# 🛡️ 食品安全国家标准判定核查工具 V1.3
-### Food Safety Standards Compliance & Lab Quality Control Suite V1.3
+# 🛡️ 食品安全国家标准判定核查工具 V1.4
+### Food Safety Standards Compliance & Lab Quality Control Suite V1.4
 
 <p align="center">
   <img src="https://img.shields.io/badge/Powered%20By-%E9%99%88%E8%80%BF%E5%BF%A0%20(CCAA%E5%9B%BD%E5%AE%B6%E6%B3%A8%E5%86%8C%E5%AE%A1%E6%A0%B8%E5%91%98)-0284C7?style=for-the-badge&logo=shield&logoColor=white" />
   <img src="https://img.shields.io/badge/%E6%9D%83%E5%A8%81%E9%99%90%E9%87%8F%E6%95%B0%E6%8D%AE-83,973%20%E6%9D%A1-10B981?style=for-the-badge&logo=databricks&logoColor=white" />
   <img src="https://img.shields.io/badge/2026%E6%8A%BD%E6%A3%80%E7%BB%86%E5%88%99%E5%9B%9B%E7%BA%A7%E5%88%86%E7%B1%BB-477%20%E7%B1%BB-F59E0B?style=for-the-badge" />
-  <a href="https://github.com/e2234731-sys/Project/releases/tag/V1.3"><img src="https://img.shields.io/badge/Release-V1.3%20Official-blue?style=for-the-badge&logo=github" /></a>
+  <a href="https://github.com/e2234731-sys/Project/releases/tag/V1.4"><img src="https://img.shields.io/badge/Release-V1.4%20Official-blue?style=for-the-badge&logo=github" /></a>
 </p>
 
 ---
 
 ## 📖 项目简介 (Overview)
 
-**《食品安全国家标准判定核查工具 V1.3》** 是一款面向 **第三方食品检验检测机构、海关农残理化实验室、食品生产企业 QA/QC 部门及认证审核员** 打造的专业级桌面数字化生产力工具。
+**《食品安全国家标准判定核查工具 V1.4》** 是一款面向 **第三方食品检验检测机构、海关农残理化实验室、食品生产企业 QA/QC 部门及认证审核员** 打造的专业级桌面数字化生产力工具。
 
 本系统由 **国家注册审核员（ISO 22000 / HACCP）、实验室理化质控专家 陈耿忠** 结合多年一线实验室文控、方法验证（GB/T 27404-2026）、CNAS/CMA 资质评审及标准查新实战经验研发。
 
-> **💡 V1.3 四大核心升级**：
-> 1. **四级分类 + 检验项目 双引擎智能反写**：深度融合《2026年国家食品安全监督抽检实施细则》（477 个四级分类、4,310 项指标）与 6 大食品安全国家标准（83,973 条限量），支持直接导入含 `食品大类（一级）`、`食品亚类（二级）`、`食品品种（三级）`、`食品细类（四级）` 及 `检验项目` 的抽检计划表（兼容合并单元格自动拆分向下填充、横幅标题行自动跳过、WPS 格式无缝读取），一键反写 `依据法律法规或标准`、`检测方法`、`标准限量值` 与 `方法检出限(LOD)`；
-> 2. **下拉式功能模块导航菜单 + 深邃午夜蓝商务 UI**：移除低数据量静态演示页，精炼聚焦 4 大全量数据核心模块，顶部采用深邃午夜蓝（`#0F172A`）导航栏搭配下拉菜单（`Combobox`）与胶囊快捷切换按钮；
-> 3. **离线一机一码授权防漂移与单实例锁加固**：引入注册表 `MachineGuid` 毫秒级校验、三路径冗余持久化、同目录 `.lic` 证书自动识别与进程级单实例互斥锁（`Mutex`），彻底杜绝因插拔 U 盘、WMI 超时或连续双击引起的重复弹窗问题；
-> 4. **搜索精准匹配绝对置顶与智能气泡划词复制**：完全吻合条目严格排在首位（Rank 0），长文本支持鼠标悬停气泡展示与自由划词复制。
+> **💡 V1.4 重大核心升级 (解决单格多检测项目合并痛点)**：
+> 1. **💥 单元格多项目智能拆分与自动拆行展开 (炸裂拆行引擎)**：
+>    - 原生解决各级市监局、省局抽检方案（如《2026年广东省食用农产品必检品种项目表》）中，在**同一个单元格**内以顿号（`、`）、逗号（`，,`）、分号（`；;`）或换行符合并填报多个检测指标（如 `恩诺沙星、氟苯尼考、磺胺类（总量）、氯霉素、沙丁胺醇、多西环素`）的难题；
+>    - **括号深度保护状态机**：智能保护圆括号 `()` `（）` 与方括号 `[]` `【】` 内部内容，复合指标（如 `合成着色剂（柠檬黄、日落黄、胭脂红、苋菜红、诱惑红、亮蓝）`、`土霉素/金霉素/四环素（组合含量）`、`磺胺类（总量）`）绝不误拆，精准保留完整指标名称；
+>    - **四级分类与属性无损继承**：拆分出的每一个检测项目逐行继承所属的 `食品大类（一级）`、`食品亚类（二级）`、`食品品种（三级）`、`食品细类（四级）`、原序号与备注，并逐行完成标准、限量与检测方法智能反写；
+>    - 表头自动识别 `必检项目`、`可选项目`、`检验项目`，界面配备 `☑️ 单元格多项目自动拆行展开` 一键开关，默认自适应开启。
+> 2. **📑 四级分类 + 检验项目 双引擎智能反写**：深度融合《2026年国家食品安全监督抽检实施细则》（477 个四级分类、4,310 项指标）与 6 大食品安全国家标准（83,973 条限量数据），原地反写或扩展反写标准、方法、限量与检出限；
+> 3. **🧭 下拉式功能切换菜单 + 午夜蓝商务 UI**：顶部整合下拉菜单与快捷胶囊按钮，全工作台配备自适应滚动容器、表格列宽拖拽记忆与长文本气泡悬停划词复制；
+> 4. **🔐 离线一机一码授权防漂移与单实例锁**：采用注册表 `MachineGuid` 毫秒级校验、三路径冗余存储与单实例互斥锁，彻底杜绝重复弹窗。
 
 ---
 
@@ -41,12 +45,12 @@
 ## 🚀 四大核心功能模块 (Core Modules)
 
 1. **🔍 1. 标准限量查询与单项判定 (6大国标全量库)**
-   - 支持按国家标准、食品分类下拉快筛及关键词检索，精准匹配项自动置顶，内置检验方法自由划选复制与单项实测值判定。
+   - 支持按国家标准、食品分类下拉快筛及关键词检索，精准匹配项自动置顶（Rank 0），内置检验方法自由划选复制与单项实测值判定。
 2. **📑 2. 四级分类与台账智能反写 (Excel自动匹配标准与方法)**
-   - 原生支持《监督抽检项目表》四级分类结构（`食品大类（一级）`、`食品亚类（二级）`、`食品品种（三级）`、`食品细类（四级）`、`检验项目`），自动拆分纵向合并单元格并向下填充分类，自动反写 `依据法律法规或标准`、`检测方法`、`标准限量值`、`检出限(LOD)` 与 `判定结论`。
+   - 原生支持《监督抽检项目表》四级分类结构（`食品大类（一级）`、`食品亚类（二级）`、`食品品种（三级）`、`食品细类（四级）`、`必检项目/可选项目/检验项目`），自动拆分纵向合并单元格并向下填充分类，单元格合并多项目自动炸裂拆行展开，自动反写 `依据法律法规或标准`、`检测方法`、`标准限量值`、`检出限(LOD)` 与 `判定结论`。
    - 内置 **📌 2026细则速查** 选择器，无需外部文件即可按一级大类与四级细类一键调出全套抽检项目、判定标准与检验方法。
 3. **🧪 3. 多项目批量判定与表头筛选 (支持实测值批量核查)**
-   - 严格保持化验员录入的项目先后顺序，支持表头点击筛选、多维状态过滤与一键导出。
+   - 严格保持化验员录入的项目先后顺序，支持在同一个输入项中贴入多个以逗号/顿号分隔的指标，支持表头点击筛选、多维状态过滤与一键导出。
 4. **🔗 4. 样品跨标全景匹配 (一键穿透6大国标)**
    - 输入任意食品名称，一键穿透 6 大食品安全国家标准，全景汇总该样品涉及的农残、兽残、重金属、真菌毒素、添加剂与致病菌限量及方法。
 
@@ -58,11 +62,11 @@
 
 | 版本类型 | 发布包文件名 | 下载直链 |
 | :--- | :--- | :--- |
-| **完整标准版 (V1.3)** | `FoodSafetyStandardChecker_V1.3.exe` | [📥 点击直接下载标准版 (V1.3 官方发布)](https://github.com/e2234731-sys/Project/releases/download/V1.3/FoodSafetyStandardChecker_V1.3.exe) |
-| **全功能批量表头筛选版 (V1.3)** | `FoodSafetyStandardChecker_Full_BatchFilter_V1.3.exe` | [📥 点击直接下载全功能版 (V1.3 官方发布)](https://github.com/e2234731-sys/Project/releases/download/V1.3/FoodSafetyStandardChecker_Full_BatchFilter_V1.3.exe) |
-| **纯净极速版 (V1.3)** | `FoodSafetyStandardChecker_Clean_V1.3.exe` | [📥 点击直接下载纯净版 (V1.3 官方发布)](https://github.com/e2234731-sys/Project/releases/download/V1.3/FoodSafetyStandardChecker_Clean_V1.3.exe) |
+| **完整标准版 (V1.4)** | `FoodSafetyStandardChecker_V1.4.exe` | [📥 点击直接下载标准版 (V1.4 官方发布)](https://github.com/e2234731-sys/Project/releases/download/V1.4/FoodSafetyStandardChecker_V1.4.exe) |
+| **全功能批量表头筛选版 (V1.4)** | `FoodSafetyStandardChecker_Full_BatchFilter_V1.4.exe` | [📥 点击直接下载全功能版 (V1.4 官方发布)](https://github.com/e2234731-sys/Project/releases/download/V1.4/FoodSafetyStandardChecker_Full_BatchFilter_V1.4.exe) |
+| **纯净极速版 (V1.4)** | `FoodSafetyStandardChecker_Clean_V1.4.exe` | [📥 点击直接下载纯净版 (V1.4 官方发布)](https://github.com/e2234731-sys/Project/releases/download/V1.4/FoodSafetyStandardChecker_Clean_V1.4.exe) |
 
-> 🔖 完整版本发布历史与更新日志请见：[GitHub Releases 官方发布页 (V1.3)](https://github.com/e2234731-sys/Project/releases/tag/V1.3)
+> 🔖 完整版本发布历史与更新日志请见：[GitHub Releases 官方发布页 (V1.4)](https://github.com/e2234731-sys/Project/releases/tag/V1.4)
 
 ---
 

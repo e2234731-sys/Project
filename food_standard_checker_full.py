@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-食品安全国家标准判定核查工具 V1.3
+食品安全国家标准判定核查工具 V1.4
 标准覆盖：GB 2760-2024, GB 2761-2017, GB 2762-2025, GB 2763-2026, GB 29921-2021, GB 31650-2019 及 2026年国家食品安全监督抽检实施细则
 Powered by 陈耿忠
 """
@@ -604,6 +604,64 @@ def judge_measured_value(limit_val_str, measured_val_str):
             return ("fail", f"✘ 超标 ({meas_num} > {lim_num})")
             
     return ("unknown", f"待核对 ({meas_s})")
+
+def split_cell_test_items(cell_text):
+    """
+    智能拆分单元格内的多个检测项目（支持顿号、逗号、分号、换行）：
+    1. 保护括号 () 与 （） 内部内容不被拆分（例如 合成着色剂（柠檬黄、日落黄...）、土霉素/金霉素/四环素（组合含量））。
+    2. 支持的分隔符：顿号 、、中文逗号 ，、英文逗号 ,、分号 ； ;、换行符 \n \r。
+    3. 自动清洗前导数字序号（如 '1.'、'①'）与多余空格。
+    """
+    if not cell_text:
+        return []
+    text = str(cell_text).strip()
+    if not text:
+        return []
+
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    tokens = []
+    cur = []
+    paren_depth = 0
+    bracket_depth = 0
+
+    for ch in text:
+        if ch in ('(', '（'):
+            paren_depth += 1
+            cur.append(ch)
+        elif ch in (')', '）'):
+            if paren_depth > 0:
+                paren_depth -= 1
+            cur.append(ch)
+        elif ch in ('[', '【'):
+            bracket_depth += 1
+            cur.append(ch)
+        elif ch in (']', '】'):
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            cur.append(ch)
+        elif paren_depth == 0 and bracket_depth == 0 and ch in ('、', '，', ',', '；', ';', '\n', '\t'):
+            tok = ''.join(cur).strip()
+            if tok:
+                tokens.append(tok)
+            cur = []
+        else:
+            cur.append(ch)
+
+    if cur:
+        tok = ''.join(cur).strip()
+        if tok:
+            tokens.append(tok)
+
+    items = []
+    for t in tokens:
+        clean_t = re.sub(r'^[0-9]+[\.、\s]*', '', t).strip()
+        clean_t = re.sub(r'^[（\(][0-9]+[）\)]\s*', '', clean_t).strip()
+        clean_t = re.sub(r'^[①②③④⑤⑥⑦⑧⑨⑩]\s*', '', clean_t).strip()
+        clean_t = re.sub(r'\s+', '', clean_t).strip()
+        if clean_t and clean_t not in ('/', '-', '--', '无', 'None'):
+            items.append(clean_t)
+    return items
 
 def parse_batch_input_line(line):
     """
@@ -1597,7 +1655,7 @@ def auto_match_record(standards, global_index, food_query, item_query, measured_
 class FoodStandardChecker:
     def __init__(self, root):
         self.root = root
-        self.root.title("食品安全国家标准判定核查工具 V1.3")
+        self.root.title("食品安全国家标准判定核查工具 V1.4")
         self.root.geometry("1260x800")
         self.root.minsize(1020, 660)
 
@@ -1615,7 +1673,7 @@ class FoodStandardChecker:
 
         total_items = sum(len(v['items']) for v in self.standards.values())
         rules_count = len(SAMPLING_RULES_FULL_DB)
-        self.root.title(f"食品安全国家标准判定核查工具 V1.3  —  6大国标 {total_items:,} 条限量 | 2026抽检细则 {rules_count} 类  |  Powered by 陈耿忠")
+        self.root.title(f"食品安全国家标准判定核查工具 V1.4  —  6大国标 {total_items:,} 条限量 | 2026抽检细则 {rules_count} 类  |  Powered by 陈耿忠")
 
         self.judge_history = []
         self.selected_category_filter = ""
@@ -1658,7 +1716,7 @@ class FoodStandardChecker:
 
         tk.Label(
             brand_frame,
-            text="🛡️ 食品安全国家标准判定核查工具 V1.3",
+            text="🛡️ 食品安全国家标准判定核查工具 V1.4",
             font=("Microsoft YaHei", 13, "bold"),
             fg="#F8FAFC",
             bg="#0F172A"
@@ -2494,15 +2552,21 @@ class FoodStandardChecker:
             messagebox.showwarning("提示", "请输入至少一个检测项目！")
             return
             
-        # 解析每行：支持纯项目名 或 项目+实测值，保持行输入先后顺序
+        # 解析每行：支持纯项目名、项目+实测值，以及单行用顿号/逗号拼接的多项目列表
         parsed_queries = []
         for line in items_text.split('\n'):
             line_str = line.strip()
             if not line_str:
                 continue
-            item_name, meas_val = parse_batch_input_line(line_str)
-            if item_name:
-                parsed_queries.append((item_name, item_name.lower(), meas_val))
+            # 若本行包含多个顿号/分号且无纯数字判定值，自动按多项目展开
+            if ('、' in line_str or '；' in line_str) and not re.search(r'[:=：]\s*\d+', line_str):
+                sub_items = split_cell_test_items(line_str)
+                for s_it in sub_items:
+                    parsed_queries.append((s_it, s_it.lower(), None))
+            else:
+                item_name, meas_val = parse_batch_input_line(line_str)
+                if item_name:
+                    parsed_queries.append((item_name, item_name.lower(), meas_val))
                 
         if not parsed_queries:
             messagebox.showwarning("提示", "未能解析到有效的检测项目！")
@@ -2714,6 +2778,25 @@ class FoodStandardChecker:
 
         self.btn_run_backfill = tb.Button(row2, text="⚡ 开始四级分类智能匹配反写", command=self.run_excel_backfill, bootstyle=SUCCESS, cursor="hand2")
         self.btn_run_backfill.pack(side=tk.RIGHT)
+
+        # 第三行：单单元格多项目自动拆分展开选项 (针对《必检品种项目表》等“、/，/换行”多项目合一的场景)
+        row3 = tb.Frame(ctl_card)
+        row3.pack(fill=tk.X, pady=(4, 0))
+
+        self.backfill_auto_split_var = tk.BooleanVar(value=True)
+        tb.Checkbutton(
+            row3,
+            text="☑️ 单元格多项目自动拆行展开 (针对“必检项目/可选项目”中顿号、逗号、分号或换行合并在同一格的抽检表，自动拆分并继承四级分类)",
+            variable=self.backfill_auto_split_var,
+            bootstyle="success-roundtoggle"
+        ).pack(side=tk.LEFT, padx=(0, 15))
+
+        tb.Label(
+            row3,
+            text="💡 提示：系统采用深度括号保护状态机，如【合成着色剂（柠檬黄、日落黄...）】等复合指标不会被误拆，精准炸裂为多行检测任务！",
+            font=("Microsoft YaHei", 8),
+            bootstyle=SECONDARY
+        ).pack(side=tk.LEFT)
 
         # 2. 质控统计看板
         stats_frame = tb.Frame(main_frame)
@@ -2999,7 +3082,7 @@ class FoodStandardChecker:
         # 2. 检验项目列推导
         item_col = ""
         for h in hdrs:
-            if any(k in h for k in ["检验项目", "检测项目", "抽检项目", "不合格项目", "项目名称", "项目", "参数", "指标"]):
+            if any(k in h for k in ["必检项目", "检验项目", "检测项目", "抽检项目", "不合格项目", "必检", "项目名称", "可选项目", "项目", "参数", "指标"]):
                 if h not in (c1_col, c2_col, c3_col, c4_col):
                     item_col = h
                     break
@@ -3198,59 +3281,71 @@ class FoodStandardChecker:
             if not raw_i:
                 continue
 
-            seq_counter += 1
-            res = auto_match_record(
-                self.standards, self.global_index,
-                f_val, raw_i, m_val,
-                cat1=c1_val, cat2=c2_val, cat3=c3_val, cat4=f_val
-            )
-            std_code, std_name, limit_str, method_str, lod_str, meas_display, judge_display, status_tag, matched_cat = res
-
-            if "精准" in status_tag or "2026细则" in status_tag or "禁用" in status_tag:
-                exact_hits += 1
-                row_tag = "tag_fail" if "不合格" in judge_display else "tag_pass"
-            elif "推导" in status_tag:
-                infer_hits += 1
-                row_tag = "tag_fail" if "不合格" in judge_display else "tag_infer"
+            # 智能拆分多检测项目单元格（如 '恩诺沙星、氟苯尼考、磺胺类（总量）'）
+            if getattr(self, 'backfill_auto_split_var', None) and self.backfill_auto_split_var.get():
+                items_to_process = split_cell_test_items(raw_i)
+                if not items_to_process:
+                    items_to_process = [raw_i]
             else:
-                miss_hits += 1
-                row_tag = "tag_miss"
+                items_to_process = [raw_i]
 
-            tree_vals = (
-                seq_counter,
-                c1_val if c1_val else "/",
-                c2_val if c2_val else "/",
-                c3_val if c3_val else "/",
-                f_val,
-                raw_i,
-                std_code,
-                method_str,
-                limit_str,
-                lod_str,
-                meas_display,
-                judge_display,
-                status_tag
-            )
-            self.backfill_tree.insert('', 'end', values=tree_vals, tags=(row_tag,))
+            for sub_item in items_to_process:
+                seq_counter += 1
+                res = auto_match_record(
+                    self.standards, self.global_index,
+                    f_val, sub_item, m_val,
+                    cat1=c1_val, cat2=c2_val, cat3=c3_val, cat4=f_val
+                )
+                std_code, std_name, limit_str, method_str, lod_str, meas_display, judge_display, status_tag, matched_cat = res
 
-            self._backfill_processed_rows.append({
-                'raw_row': list(row),
-                'seq': seq_counter,
-                'cat1': c1_val,
-                'cat2': c2_val,
-                'cat3': c3_val,
-                'food': f_val,
-                'item': raw_i,
-                'std_code': std_code,
-                'std_name': std_name,
-                'limit': limit_str,
-                'method': method_str,
-                'lod': lod_str,
-                'meas': meas_display,
-                'judge': judge_display,
-                'status': status_tag,
-                'category': matched_cat
-            })
+                if len(items_to_process) > 1 and "精准" in status_tag:
+                    status_tag = status_tag.replace("精准匹配", "拆分精准匹配")
+
+                if "精准" in status_tag or "2026细则" in status_tag or "禁用" in status_tag:
+                    exact_hits += 1
+                    row_tag = "tag_fail" if "不合格" in judge_display else "tag_pass"
+                elif "推导" in status_tag:
+                    infer_hits += 1
+                    row_tag = "tag_fail" if "不合格" in judge_display else "tag_infer"
+                else:
+                    miss_hits += 1
+                    row_tag = "tag_miss"
+
+                tree_vals = (
+                    seq_counter,
+                    c1_val if c1_val else "/",
+                    c2_val if c2_val else "/",
+                    c3_val if c3_val else "/",
+                    f_val,
+                    sub_item,
+                    std_code,
+                    method_str,
+                    limit_str,
+                    lod_str,
+                    meas_display,
+                    judge_display,
+                    status_tag
+                )
+                self.backfill_tree.insert('', 'end', values=tree_vals, tags=(row_tag,))
+
+                self._backfill_processed_rows.append({
+                    'raw_row': list(row),
+                    'seq': seq_counter,
+                    'cat1': c1_val,
+                    'cat2': c2_val,
+                    'cat3': c3_val,
+                    'food': f_val,
+                    'item': sub_item,
+                    'std_code': std_code,
+                    'std_name': std_name,
+                    'limit': limit_str,
+                    'method': method_str,
+                    'lod': lod_str,
+                    'meas': meas_display,
+                    'judge': judge_display,
+                    'status': status_tag,
+                    'category': matched_cat
+                })
 
         valid_total = exact_hits + infer_hits + miss_hits
         pct = ((exact_hits + infer_hits) / valid_total * 100) if valid_total > 0 else 0
@@ -4159,7 +4254,7 @@ def acquire_single_instance_mutex():
                 user32 = ctypes.windll.user32
                 for title in [
                     "🔐 软件离线授权激活中心 (一机一码)",
-                    "食品安全国家标准判定核查工具 V1.3"
+                    "食品安全国家标准判定核查工具 V1.4"
                 ]:
                     hwnd = user32.FindWindowW(None, title)
                     if hwnd:
@@ -4184,7 +4279,7 @@ def main():
     # 1. 全局一机一码离线授权校验与拦截（已激活电脑毫秒级静默通过，永不重复弹窗）
     try:
         from license_manager import check_and_require_license
-        if not check_and_require_license(root, app_name="食品安全国家标准判定核查工具 V1.3", app_id="FSC"):
+        if not check_and_require_license(root, app_name="食品安全国家标准判定核查工具 V1.4", app_id="FSC"):
             os._exit(0)
     except Exception as e:
         print("License check warning:", e)
@@ -4204,7 +4299,7 @@ def main():
 
     tk.Label(
         splash_frame,
-        text="🛡️ 食品安全国家标准判定核查工具 V1.3",
+        text="🛡️ 食品安全国家标准判定核查工具 V1.4",
         font=("Microsoft YaHei", 13, "bold"),
         fg="#F8FAFC",
         bg="#0F172A"
